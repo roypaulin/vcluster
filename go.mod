@@ -13,3 +13,5 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 )
+
+replace github.com/rpaulin/vcluster => github.com/vertica/vcluster v0.0.0-20230619120328-5d8c9008e000
