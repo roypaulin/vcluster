@@ -39,6 +39,7 @@ const (
 	StopDB
 	MyDB
 	NoDB
+	IsDB
 )
 
 func (op OpType) String() string {
@@ -51,6 +52,8 @@ func (op OpType) String() string {
 		return "My DB"
 	case NoDB:
 		return "No DB"
+	case IsDB:
+		return "Is DB"
 	}
 	return "unknown operation"
 }
