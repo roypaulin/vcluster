@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package commands
 
 import (
@@ -21,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/vertica/vcluster/vclusterops"
+	"vertica.com/vcluster/vclusterops"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -56,7 +41,7 @@ func TestConfigCmd(t *testing.T) {
 	log.SetOutput(&logStr)
 
 	// create a stub YAML file
-	const yamlPath = vclusterops.ConfigFileName
+	const yamlPath = "vertica_cluster.yaml"
 	const yamlStr = "hosts\n  - vnode1\n  - vnode2\n  - vnode3"
 	_ = os.WriteFile(yamlPath, []byte(yamlStr), vclusterops.ConfigFilePerm)
 	defer os.Remove(yamlPath)
@@ -86,5 +71,5 @@ func TestConfigCmd(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = cmdInit.Run()
-	assert.ErrorContains(t, err, vclusterops.ConfigFileName+" already exists")
+	assert.ErrorContains(t, err, "vertica_cluster.yaml already exists")
 }

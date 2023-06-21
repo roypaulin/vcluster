@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package vclusterops
 
 import (
@@ -20,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 const (
@@ -29,21 +14,21 @@ const (
 	OneMinute             = 60 * OneSecond
 	StopDBTimeout         = 5 * OneMinute
 	StartupPollingTimeout = 5 * OneMinute
-	PollingInterval       = 3 * OneSecond
+	PollingInterval       = 5 * OneSecond
 )
 
 type OpType int
 
 const (
 	CreateDB OpType = iota
-	StopDB
+	StopDBBB
 )
 
 func (op OpType) String() string {
 	switch op {
 	case CreateDB:
 		return "Create DB"
-	case StopDB:
+	case StopDBBB:
 		return "Stop DB"
 	}
 	return "unknown operation"
@@ -100,24 +85,23 @@ func (op *HTTPCheckRunningDBOp) Prepare(execContext *OpEngineExecContext) Cluste
 
 /* HTTPNodeStateResponse example:
    {'details':[]
-    'node_list':[{'name': 'v_test_db_running_node0001',
-	          'node_id':'45035996273704982',
-		  'address': '192.168.1.101',
-		  'state' : 'UP'
-		  'database' : 'test_db',
-		  'is_primary' : true,
-		  'is_readonly' : false,
-		  'catalog_path' : "\/data\/test_db\/v_test_db_node0001_catalog\/Catalog"
-		  'subcluster_name' : ''
-		  'last_msg_from_node_at':'2023-01-23T15:18:18.44866"
-		  'down_since' : null
-		  'build_info' : "v12.0.4-7142c8b01f373cc1aa60b1a8feff6c40bfb7afe8"
-    }]}
+	'node_list':[{ 'name': 'v_test_db_running_node0001',
+	               'node_id':'45035996273704982',
+		           'address': '192.168.1.101',
+		           'state' : 'UP'
+		           'database' : 'test_db',
+		           'is_primary' : true,
+		           'is_readonly' : false,
+		           'catalog_path' : "\/data\/test_db\/v_test_db_node0001_catalog\/Catalog"
+		           'subcluster_name' : ''
+		           'last_msg_from_node_at':'2023-01-23T15:18:18.44866"
+		           'down_since' : null
+		           'build_info' : "v12.0.4-7142c8b01f373cc1aa60b1a8feff6c40bfb7afe8"
+	}]}
 */
 //
-// or a message if the endpoint doesn't return a well-structured JSON, examples:
+// or a message if the endpoint doesn't return a well-structured JSON, an example:
 // {'message': 'Local node has not joined cluster yet, HTTP server will accept connections when the node has joined the cluster\n'}
-// {"message": "Wrong password\n"}
 type HTTPNodeStateResponse map[string][]map[string]string
 
 func (op *HTTPCheckRunningDBOp) isDBRunningOnHost(host string,
@@ -165,14 +149,12 @@ func (op *HTTPCheckRunningDBOp) processResult(execContext *OpEngineExecContext) 
 	msg := ""
 	for host, result := range op.clusterHTTPRequest.ResultCollection {
 		resSummaryStr := SuccessResult
-		// VER-87303: it's possible that there's a DB running with a different password
-		if !result.IsHTTPRunning() {
+		if !result.isPassing() {
 			resSummaryStr = FailureResult
 		}
-		vlog.LogPrintInfo("[%s] result from host %s summary %s, details: %+v.",
+		vlog.LogPrintInfo("[%s] result from host %s summary %s, details %+v.\n",
 			op.name, host, resSummaryStr, result)
-
-		if result.isFailing() && !result.IsHTTPRunning() {
+		if result.isFailing() {
 			downHosts[host] = true
 			continue
 		} else if result.isException() {
@@ -206,7 +188,7 @@ func (op *HTTPCheckRunningDBOp) processResult(execContext *OpEngineExecContext) 
 	// log info
 	vlog.LogInfo("[%s] check db running results: up hosts %v; down hosts %v; hosts with status unknown %v",
 		op.name, upHosts, downHosts, exceptionHosts)
-	// no DB is running on hosts, return a passed result
+	// DB is running
 	if len(upHosts) == 0 {
 		return MakeClusterOpResultPass()
 	}

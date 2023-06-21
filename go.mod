@@ -1,4 +1,4 @@
-module github.com/vertica/vcluster
+module vertica.com/vcluster
 
 go 1.20
 

@@ -1,19 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
-// TODO move this file to commands package
 package vclusterops
 
 import (
@@ -21,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 	"gopkg.in/yaml.v3"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 const (
@@ -35,14 +19,10 @@ const ConfigFileName = "vertica_cluster.yaml"
 const ConfigBackupName = "vertica_cluster.yaml.backup"
 
 type ClusterConfig struct {
-	DBName      string       `yaml:"db_name"`
-	Hosts       []string     `yaml:"hosts"`
-	Nodes       []NodeConfig `yaml:"nodes"`
-	CatalogPath string       `yaml:"catalog_path"`
-	DataPath    string       `yaml:"data_path"`
-	DepotPath   string       `yaml:"depot_path"`
-	IsEon       bool         `yaml:"eon_mode"`
-	Ipv6        bool         `yaml:"ipv6"`
+	DBName string `yaml:"db_name"`
+	Hosts  []string
+	Nodes  []NodeConfig
+	IsEon  bool `yaml:"eon_mode"`
 }
 
 type NodeConfig struct {
@@ -52,25 +32,6 @@ type NodeConfig struct {
 
 func MakeClusterConfig() ClusterConfig {
 	return ClusterConfig{}
-}
-
-// read config information from the YAML file
-func ReadConfig(configDirectory string) (ClusterConfig, error) {
-	clusterConfig := ClusterConfig{}
-
-	configFilePath := filepath.Join(configDirectory, ConfigFileName)
-	configBytes, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return clusterConfig, fmt.Errorf("fail to read config file, details: %w", err)
-	}
-
-	err = yaml.Unmarshal(configBytes, &clusterConfig)
-	if err != nil {
-		return clusterConfig, fmt.Errorf("fail to unmarshal config file, details: %w", err)
-	}
-
-	vlog.LogPrintInfo("The content of cluster config: %+v\n", clusterConfig)
-	return clusterConfig, nil
 }
 
 // write config information to the YAML file
@@ -100,8 +61,8 @@ func GetConfigFilePath(dbName string, inputConfigDir *string) (string, error) {
 		return filepath.Join(*inputConfigDir, ConfigFileName), nil
 	}
 
-	// otherwise write it under the current directory
-	// as <current_dir>/vertica_cluster.yaml
+	// otherwise write it under the user home directory
+	// as <current_dir or home_dir>/<db_name>/vertica_cluster.yaml
 	currentDir, err := os.Getwd()
 	if err != nil {
 		vlog.LogWarning("Fail to get current directory\n")
@@ -130,25 +91,6 @@ func BackupConfigFile(configFilePath string) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	return nil
-}
-
-func RemoveConfigFile(configDirectory string) error {
-	configFilePath := filepath.Join(configDirectory, ConfigFileName)
-	configBackupPath := filepath.Join(configDirectory, ConfigBackupName)
-
-	err := os.RemoveAll(configFilePath)
-	if err != nil {
-		vlog.LogPrintError("Fail to remove the config file %s, detail: %w", configFilePath, err)
-		return err
-	}
-
-	err = os.RemoveAll(configBackupPath)
-	if err != nil {
-		vlog.LogPrintError("Fail to remove the backup config file %s, detail: %w", configBackupPath, err)
-		return err
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-# Quick start to add a third party library
+# Quick start to add a thrid party library
 
 1. Update imports to include a third party library. To add logrus
 ```

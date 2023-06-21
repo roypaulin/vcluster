@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package vclusterops
 
 import (
@@ -22,9 +7,27 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/vertica/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/util"
 )
+
+func TestDBName(t *testing.T) {
+	// positive cases
+	err := validateDBName("test_db")
+	assert.Nil(t, err)
+
+	err = validateDBName("db1")
+	assert.Nil(t, err)
+
+	// negative cases
+	err = validateDBName("test$db")
+	assert.ErrorContains(t, err, "invalid character in database name: $")
+
+	err = validateDBName("[db1]")
+	assert.ErrorContains(t, err, "invalid character in database name: [")
+
+	err = validateDBName("!!??!!db1")
+	assert.ErrorContains(t, err, "invalid character in database name: !")
+}
 
 func TestValidateDepotSize(t *testing.T) {
 	res, err := validateDepotSize("-19%")
@@ -57,14 +60,10 @@ func TestValidateDepotSize(t *testing.T) {
 
 func TestWriteClusterConfig(t *testing.T) {
 	const dbName = "practice_db"
-	const path = "/data"
 
 	// generate a YAML file based on a stub vdb
 	vdb := VCoordinationDatabase{}
 	vdb.Name = dbName
-	vdb.CatalogPrefix = path
-	vdb.DataPrefix = path
-	vdb.DepotPrefix = path
 	vdb.HostList = []string{"ip_1", "ip_2", "ip_3"}
 	vdb.HostNodeMap = make(map[string]VCoordinationNode)
 	for i, h := range vdb.HostList {
@@ -72,7 +71,6 @@ func TestWriteClusterConfig(t *testing.T) {
 		n.Name = fmt.Sprintf("node_name_%d", i+1)
 		vdb.HostNodeMap[h] = n
 	}
-	vdb.IsEon = true
 
 	err := writeClusterConfig(&vdb, nil)
 	assert.NoError(t, err)

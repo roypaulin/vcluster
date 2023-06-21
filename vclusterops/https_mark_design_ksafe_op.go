@@ -1,25 +1,10 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package vclusterops
 
 import (
 	"strconv"
 
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 const zeroSafeRspStr = "Marked design 0-safe"
@@ -52,13 +37,13 @@ func MakeHTTPSMarkDesignKSafeOp(name string,
 	util.ValidateUsernameAndPassword(useHTTPPassword, userName)
 	httpsMarkDesignKSafeOp.userName = userName
 	httpsMarkDesignKSafeOp.httpsPassword = httpsPassword
+
 	return httpsMarkDesignKSafeOp
 }
 
 func (op *HTTPSMarkDesignKSafeOp) setupClusterHTTPRequest(hosts []string) {
 	op.clusterHTTPRequest = ClusterHTTPRequest{}
 	op.clusterHTTPRequest.RequestCollection = make(map[string]HostHTTPRequest)
-	op.setVersionToSemVar()
 
 	// in practice, initiator only
 	for _, host := range hosts {
@@ -125,8 +110,7 @@ func (op *HTTPSMarkDesignKSafeOp) processResult(execContext *OpEngineExecContext
 		} else if markDesignKSafeRsp.Detail == oneSafeRspStr {
 			ksafeValue = 1
 		} else {
-			vlog.LogPrintError(`[%s] fail to parse the ksafety value information, detail: %s`,
-				op.name, markDesignKSafeRsp.Detail)
+			vlog.LogPrintError(`[%s] fail to parse the ksafety value information, detail: %s`, op.name, markDesignKSafeRsp.Detail)
 			success = false
 			continue
 		}

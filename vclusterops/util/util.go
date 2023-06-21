@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package util
 
 import (
@@ -31,7 +16,7 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 func GetJSONLogErrors(responseContent string, responseObj any, opName string) error {
@@ -185,25 +170,6 @@ func ResolveToOneIP(hostname string, ipv6 bool) (string, error) {
 		return "", fmt.Errorf("%s is resolved to more than one IP addresss: %v", hostname, addrs)
 	}
 	return addrs[0], nil
-}
-
-// resolve RawHosts to be IP addresses
-func ResolveRawHostsToAddresses(rawHosts []string, ipv6 bool) ([]string, error) {
-	var hostAddresses []string
-
-	for _, host := range rawHosts {
-		if host == "" {
-			return hostAddresses, fmt.Errorf("invalid empty host found in the provided host list")
-		}
-		addr, err := ResolveToOneIP(host, ipv6)
-		if err != nil {
-			return hostAddresses, err
-		}
-		// use a list to respect user input order
-		hostAddresses = append(hostAddresses, addr)
-	}
-
-	return hostAddresses, nil
 }
 
 // replace all '//' to be '/', trim the path string
@@ -363,44 +329,4 @@ func IsOptionSet(parser *flag.FlagSet, optionName string) bool {
 		flagVisitMap[f.Name] = true
 	})
 	return flagVisitMap[optionName]
-}
-
-// when db name is provided, make sure no special chars are in it
-func ValidateDBName(dbName string) error {
-	escapeChars := `=<>'^\".@*?#&/-:;{}()[] \~!%+|,` + "`$"
-	for _, c := range dbName {
-		if strings.Contains(escapeChars, string(c)) {
-			return fmt.Errorf("invalid character in database name: %c", c)
-		}
-	}
-	return nil
-}
-
-// suppress help message for hidden options
-func SetParserUsage(parser *flag.FlagSet, op string) {
-	fmt.Printf("Usage of %s:\n", op)
-	fmt.Println("Options:")
-	parser.VisitAll(func(f *flag.Flag) {
-		if f.Usage != SuppressHelp {
-			fmt.Printf("  -%s\n\t%s\n", f.Name, f.Usage)
-		}
-	})
-}
-
-func GetOptionalFlagMsg(message string) string {
-	return message + " [Optional]"
-}
-
-func GetEonFlagMsg(message string) string {
-	return "[Eon only] " + message
-}
-
-func ValidateAbsPath(path *string, errorMsg string) error {
-	if path != nil {
-		err := AbsPathCheck(*path)
-		if err != nil {
-			return fmt.Errorf("%s", errorMsg)
-		}
-	}
-	return nil
 }

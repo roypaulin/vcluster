@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package util
 
 import (
@@ -226,35 +211,4 @@ func TestNewErrorFormatVerb(t *testing.T) {
 	oldErr3 := fmt.Errorf("fail to marshal start command, %v", err)
 	newErr3 := fmt.Errorf("fail to marshal start command, %w", err)
 	assert.EqualError(t, oldErr3, newErr3.Error())
-}
-
-func TestValidateDBName(t *testing.T) {
-	// positive cases
-	err := ValidateDBName("test_db")
-	assert.Nil(t, err)
-
-	err = ValidateDBName("db1")
-	assert.Nil(t, err)
-
-	// negative cases
-	err = ValidateDBName("test$db")
-	assert.ErrorContains(t, err, "invalid character in database name: $")
-
-	err = ValidateDBName("[db1]")
-	assert.ErrorContains(t, err, "invalid character in database name: [")
-
-	err = ValidateDBName("!!??!!db1")
-	assert.ErrorContains(t, err, "invalid character in database name: !")
-}
-
-func TestSetOptFlagHelpMsg(t *testing.T) {
-	msg := "The name of the database to be created"
-	finalMsg := "The name of the database to be created [Optional]"
-	assert.Equal(t, GetOptionalFlagMsg(msg), finalMsg)
-}
-
-func TestSetEonFlagHelpMsg(t *testing.T) {
-	msg := "Path to depot directory"
-	finalMsg := "[Eon only] Path to depot directory"
-	assert.Equal(t, GetEonFlagMsg(msg), finalMsg)
 }

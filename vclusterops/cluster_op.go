@@ -1,23 +1,8 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package vclusterops
 
 import (
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 /* Op and host http result status
@@ -54,13 +39,6 @@ const (
 	ExceptionResult = "FAILURE"
 )
 
-const (
-	SuccessCode        = 200
-	MultipleChoiceCode = 300
-	UnauthorizedCode   = 401
-	InternalErrorCode  = 500
-)
-
 // ClusterOpResult is used to hold the ClusterOp's result
 // at the steps of prepare, execute, and finalize
 type ClusterOpResult struct {
@@ -75,21 +53,6 @@ type HostHTTPResult struct {
 	host       string
 	content    string
 	errMsg     string
-}
-
-func (hostResult *HostHTTPResult) IsUnauthorizedRequest() bool {
-	return hostResult.statusCode == UnauthorizedCode
-}
-
-func (hostResult *HostHTTPResult) IsInternalError() bool {
-	return hostResult.statusCode == InternalErrorCode
-}
-
-func (hostResult *HostHTTPResult) IsHTTPRunning() bool {
-	if hostResult.isPassing() || hostResult.IsUnauthorizedRequest() || hostResult.IsInternalError() {
-		return true
-	}
-	return false
 }
 
 func MakeClusterOpResultPass() ClusterOpResult {
@@ -177,7 +140,6 @@ func (op *OpBase) getName() string {
 func (op *OpBase) parseAndCheckResponse(host, responseContent string, responseObj any) error {
 	err := util.GetJSONLogErrors(responseContent, &responseObj, op.name)
 	if err != nil {
-		vlog.LogError("[%s] fail to parse response on host %s, detail: %w", op.name, host, err)
 		return err
 	}
 	vlog.LogInfo("[%s] JSON response from %s is %+v\n", op.name, host, responseObj)

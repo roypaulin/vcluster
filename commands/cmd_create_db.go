@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package commands
 
 import (
@@ -21,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vertica/vcluster/vclusterops"
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 /* CmdCreateDB
@@ -57,66 +42,58 @@ func MakeCmdCreateDB() CmdCreateDB {
 
 	// required flags
 	createDBOptions.Name = newCmd.parser.String("name", "", "The name of the database to be created")
+	createDBOptions.Password = newCmd.parser.String("password", "", "Database password in single quotes [Optional]")
 	newCmd.hostListStr = newCmd.parser.String("hosts", "", "Comma-separated list of hosts to participate in database")
+	createDBOptions.LicensePathOnNode = newCmd.parser.String("license", "", "Database license [Optional]")
 	createDBOptions.CatalogPrefix = newCmd.parser.String("catalog-path", "", "Path of catalog directory")
 	createDBOptions.DataPrefix = newCmd.parser.String("data-path", "", "Path of data directory")
 
 	// optional
-	createDBOptions.Password = newCmd.parser.String("password", "", util.GetOptionalFlagMsg("Database password in single quotes"))
-	createDBOptions.LicensePathOnNode = newCmd.parser.String("license", "", util.GetOptionalFlagMsg("Database license"))
-	createDBOptions.Policy = newCmd.parser.String("policy", util.DefaultRestartPolicy,
-		util.GetOptionalFlagMsg("Restart policy of the database"))
-	createDBOptions.SQLFile = newCmd.parser.String("sql", "",
-		util.GetOptionalFlagMsg("SQL file to run (as dbadmin) immediately on database creation"))
-	createDBOptions.ConfigDirectory = newCmd.parser.String("config-directory", "",
-		util.GetOptionalFlagMsg("Directory where "+vclusterops.ConfigFileName+" is located"))
-	createDBOptions.LogPath = newCmd.parser.String("log-path", "", "Directory where the log file will be generated")
+	createDBOptions.Policy = newCmd.parser.String("policy", util.DefaultRestartPolicy, "Restart policy of the database")
+	createDBOptions.SQLFile = newCmd.parser.String("sql", "", "SQL file to run (as dbadmin) immediately on database creation")
+	createDBOptions.ConfigDirectory = newCmd.parser.String("config-directory", "", "Directory where the config file will be generated")
 
 	// Eon flags
 	createDBOptions.CommunalStorageLocation = newCmd.parser.String("communal-storage-location", "",
-		util.GetEonFlagMsg("Location of communal storage"))
-	createDBOptions.ShardCount = newCmd.parser.Int("shard-count", 0, util.GetEonFlagMsg("Number of shards in the database"))
+		EonOnlyOption+"Location of communal storage")
+	createDBOptions.ShardCount = newCmd.parser.Int("shard-count", 0, EonOnlyOption+"Number of shards in the database")
 	createDBOptions.CommunalStorageParamsPath = newCmd.parser.String("communal_storage-params", "",
-		util.GetEonFlagMsg("Location of communal storage parameter file"))
-	createDBOptions.DepotPrefix = newCmd.parser.String("depot-path", "", util.GetEonFlagMsg("Path to depot directory"))
-	createDBOptions.DepotSize = newCmd.parser.String("depot-size", "", util.GetEonFlagMsg("Size of depot"))
+		EonOnlyOption+"Location of communal storage parameter file")
+	createDBOptions.DepotPrefix = newCmd.parser.String("depot-path", "", EonOnlyOption+"Path to depot directory")
+	createDBOptions.DepotSize = newCmd.parser.String("depot-size", "", EonOnlyOption+"Size of depot")
 	createDBOptions.GetAwsCredentialsFromEnv = newCmd.parser.Bool("get-aws-credentials-from-env-vars", false,
-		util.GetEonFlagMsg("Read AWS credentials from environment variables"))
+		EonOnlyOption+"Read AWS credentials from environment variables")
 
-	newCmd.configParamListStr = newCmd.parser.String("config-param", "", util.GetOptionalFlagMsg(
-		"Comma-separated list of NAME=VALUE pairs for setting database configuration parametesr immediately on database creation"))
+	newCmd.configParamListStr = newCmd.parser.String("config-param", "",
+		"Comma-separated list of NAME=VALUE pairs for setting database configuration parametesr immediately on database creation")
 
 	// new flags comparing to adminTools create_db
-	createDBOptions.Ipv6 = newCmd.parser.Bool("ipv6", false, util.GetOptionalFlagMsg("Create database with IPv6 hosts"))
+	createDBOptions.Ipv6 = newCmd.parser.Bool("ipv6", false, "Create database with IPv6 hosts")
 	// by default use pt2pt mode
 	createDBOptions.P2p = newCmd.parser.Bool("point-to-point", true,
-		util.GetOptionalFlagMsg("Configure Spread to use point-to-point communication between all Vertica nodes"))
+		"Configure Spread to use point-to-point communication between all Vertica nodes")
 	createDBOptions.Broadcast = newCmd.parser.Bool("broadcast", false,
-		util.GetOptionalFlagMsg("Configure Spread to use UDP broadcast traffic between nodes on the same subnet"))
-	createDBOptions.LargeCluster = newCmd.parser.Int("large-cluster", -1, util.GetOptionalFlagMsg("Enables a large cluster layout"))
-	createDBOptions.SpreadLogging = newCmd.parser.Bool("spread-logging", false, util.GetOptionalFlagMsg("Whether enable spread logging"))
-	createDBOptions.SpreadLoggingLevel = newCmd.parser.Int("spread-logging-level", -1, util.GetOptionalFlagMsg("Spread logging level"))
+		"Configure Spread to use UDP broadcast traffic between nodes on the same subnet")
+	createDBOptions.LargeCluster = newCmd.parser.Int("large-cluster", -1, "Enables a large cluster layout")
+	createDBOptions.SpreadLogging = newCmd.parser.Bool("spread-logging", false, "Whether enable spread logging")
+	createDBOptions.SpreadLoggingLevel = newCmd.parser.Int("spread-logging-level", -1, "Spread logging level")
 
 	createDBOptions.ForceCleanupOnFailure = newCmd.parser.Bool("force-cleanup-on-failure", false,
-		util.GetOptionalFlagMsg("Force removal of existing directories on failure of command"))
+		"Force removal of existing directories on failure of command")
 	createDBOptions.ForceRemovalAtCreation = newCmd.parser.Bool("force-removal-at-creation", false,
-		util.GetOptionalFlagMsg("Force removal of existing directories before creating the database"))
+		"Force removal of existing directories before creating the database")
 
 	createDBOptions.SkipPackageInstall = newCmd.parser.Bool("skip-package-install", false,
-		util.GetOptionalFlagMsg("Skip the installation of packages from /opt/vertica/packages."))
+		"Skip the installation of packages from /opt/vertica/packages.")
 
 	createDBOptions.TimeoutNodeStartupSeconds = newCmd.parser.Int("startup-timeout", util.DefaultTimeoutSeconds,
-		util.GetOptionalFlagMsg("Timeout for polling node start up state"))
+		"Timeout for polling node start up state")
 
 	// hidden options
-	createDBOptions.ClientPort = newCmd.parser.Int("client-port", util.DefaultClientPort, util.SuppressHelp)
-	createDBOptions.SkipStartupPolling = newCmd.parser.Bool("skip-startup-polling", false, util.SuppressHelp)
+	createDBOptions.ClientPort = newCmd.parser.Int("client-port", util.DefaultClientPort, "Create database with specified client port")
+	createDBOptions.SkipStartupPolling = newCmd.parser.Bool("skip-startup-polling", false, "Skip polling node startup state")
 
 	newCmd.createDBOptions = &createDBOptions
-
-	newCmd.parser.Usage = func() {
-		util.SetParserUsage(newCmd.parser, "create_db")
-	}
 
 	return newCmd
 }
@@ -127,6 +104,7 @@ func (c *CmdCreateDB) CommandType() string {
 
 func (c *CmdCreateDB) Parse(inputArgv []string) error {
 	vlog.LogArgParse(&inputArgv)
+
 	if c.parser == nil {
 		return fmt.Errorf("unexpected nil - the parser was nil")
 	}
@@ -143,14 +121,8 @@ func (c *CmdCreateDB) Parse(inputArgv []string) error {
 	}
 
 	// handle options that are not passed in
-	if !util.IsOptionSet(c.parser, "log-path") {
-		c.createDBOptions.LogPath = nil
-	}
 	if !util.IsOptionSet(c.parser, "config-directory") {
 		c.createDBOptions.ConfigDirectory = nil
-	}
-	if !util.IsOptionSet(c.parser, "password") {
-		c.createDBOptions.Password = nil
 	}
 
 	return c.validateParse()
@@ -171,7 +143,7 @@ func (c *CmdCreateDB) validateParse() error {
 	if err != nil {
 		return err
 	}
-	return nil
+	return c.createDBOptions.ValidateParseOptions()
 }
 
 // the hosts should be separated by comma, and will be converted to lower case
@@ -228,7 +200,8 @@ func (c *CmdCreateDB) Run() error {
 func (c *CmdCreateDB) PrintUsage() {
 	thisCommand := c.CommandType()
 	fmt.Fprintf(os.Stderr,
-		"Please refer the usage of \"vcluster %s\" using \"vcluster %s --help\"\n",
+		"vcluster %s --name <db_name>\nExample: vcluster %s --name db1\n",
 		thisCommand,
 		thisCommand)
+	c.parser.PrintDefaults()
 }

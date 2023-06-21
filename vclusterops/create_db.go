@@ -1,18 +1,3 @@
-/*
- (c) Copyright [2023] Open Text.
- Licensed under the Apache License, Version 2.0 (the "License");
- You may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
-*/
-
 package vclusterops
 
 import (
@@ -22,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+	"vertica.com/vcluster/vclusterops/util"
+	"vertica.com/vcluster/vclusterops/vlog"
 )
 
 const ksafetyThreshold = 3
@@ -33,14 +18,20 @@ const ksafeValue = 1
 // Normal strings are easier and safer to use in Go.
 type VCreateDatabaseOptions struct {
 	// part 1: basic db info
-	VClusterDatabaseOptions
+	Name              *string
+	Password          *string
+	RawHosts          []string // expected to be IP addresses or hostnames
+	Hosts             []string // expected to be IP addresses resolved from RawHosts
+	LicensePathOnNode *string  // required to be a fully qualified path
+	CatalogPrefix     *string
+	DataPrefix        *string
 	Policy            *string
 	SQLFile           *string
-	LicensePathOnNode *string // required to be a fully qualified path
 	// part 2: eon db info
 	ShardCount                *int
 	CommunalStorageLocation   *string
 	CommunalStorageParamsPath *string
+	DepotPrefix               *string
 	DepotSize                 *string // like 10G
 	GetAwsCredentialsFromEnv  *bool
 	// part 3: optional info
@@ -50,6 +41,7 @@ type VCreateDatabaseOptions struct {
 	SkipPackageInstall        *bool
 	TimeoutNodeStartupSeconds *int
 	// part 4: new params originally in installer generated admintools.conf, now in create db op
+	Ipv6               *bool
 	Broadcast          *bool
 	P2p                *bool
 	LargeCluster       *int
@@ -58,7 +50,6 @@ type VCreateDatabaseOptions struct {
 	SpreadLoggingLevel *int
 	// part 5: other params
 	SkipStartupPolling *bool
-	LogPath            *string
 	ConfigDirectory    *string
 }
 
@@ -74,9 +65,8 @@ func (options *VCreateDatabaseOptions) ValidateRequiredOptions() error {
 	if *options.Name == "" {
 		return fmt.Errorf("must specify a database name")
 	}
-	err := util.ValidateDBName(*options.Name)
-	if err != nil {
-		return err
+	if err := validateDBName(*options.Name); err != nil {
+		return nil
 	}
 	if len(options.RawHosts) == 0 {
 		return fmt.Errorf("must specify a host or host list")
@@ -91,9 +81,7 @@ func (options *VCreateDatabaseOptions) ValidateRequiredOptions() error {
 	}
 
 	// batch 2: validate required parameters with default values
-	if options.Password == nil {
-		options.Password = new(string)
-		*options.Password = ""
+	if *options.Password == "" {
 		vlog.LogPrintInfoln("no password specified, using none")
 	}
 
@@ -113,13 +101,9 @@ func (options *VCreateDatabaseOptions) ValidateRequiredOptions() error {
 	}
 
 	// batch 3: validate other parameters
-	err = util.ValidateAbsPath(options.LogPath, "must specify an absolute path for the log directory")
+	err := util.AbsPathCheck(*options.ConfigDirectory)
 	if err != nil {
-		return err
-	}
-	err = util.ValidateAbsPath(options.ConfigDirectory, "must specify an absolute path for the config directory")
-	if err != nil {
-		return err
+		return fmt.Errorf("must specify an absolute path for the config directory")
 	}
 
 	return nil
@@ -254,12 +238,17 @@ func (options *VCreateDatabaseOptions) ValidateParseOptions() error {
 // Do advanced analysis on the options inputs, like resolve hostnames to be IPs
 func (options *VCreateDatabaseOptions) AnalyzeOptions() error {
 	// resolve RawHosts to be IP addresses
-	hostAddresses, err := util.ResolveRawHostsToAddresses(options.RawHosts, *options.Ipv6)
-	if err != nil {
-		return err
+	for _, host := range options.RawHosts {
+		if host == "" {
+			return fmt.Errorf("invalid empty host found in the provided host list")
+		}
+		addr, err := util.ResolveToOneIP(host, *options.Ipv6)
+		if err != nil {
+			return err
+		}
+		// use a list to respect user input order
+		options.Hosts = append(options.Hosts, addr)
 	}
-	options.Hosts = hostAddresses
-
 	// process correct catalog path, data path and depot path prefixes
 	*options.CatalogPrefix = util.GetCleanPath(*options.CatalogPrefix)
 	*options.DataPrefix = util.GetCleanPath(*options.DataPrefix)
@@ -283,20 +272,30 @@ func (options *VCreateDatabaseOptions) ValidateAnalyzeOptions() error {
 	return nil
 }
 
+func validateDBName(dbName string) error {
+	escapeChars := `=<>'^\".@*?#&/-:;{}()[] \~!%+|,` + "`$"
+	for _, c := range dbName {
+		if strings.Contains(escapeChars, string(c)) {
+			return fmt.Errorf("invalid character in database name: %c", c)
+		}
+	}
+	return nil
+}
+
 func VCreateDatabase(options *VCreateDatabaseOptions) (VCoordinationDatabase, error) {
 	/*
 	 *   - Produce Instructions
 	 *   - Create a VClusterOpEngine
 	 *   - Give the instructions to the VClusterOpEngine to run
 	 */
-	// Analyze to produce vdb info, for later create db use and for cache db info
+	// Analyze to produce a vdb info, for later create db use and for cache db info
 	vdb := MakeVCoordinationDatabase()
 	err := vdb.SetFromCreateDBOptions(options)
 	if err != nil {
 		return vdb, err
 	}
 	// produce instructions
-	instructions, err := produceCreateDBInstructions(&vdb, options)
+	instructions, err := produceInstructions(&vdb, options)
 	if err != nil {
 		vlog.LogPrintError("fail to produce instructions, %w", err)
 		return vdb, err
@@ -323,27 +322,27 @@ func VCreateDatabase(options *VCreateDatabaseOptions) (VCoordinationDatabase, er
 
 /*
 We expect that we will ultimately produce the following instructions:
-    1. Check NMA connectivity
-	2. Check to see if any dbs running
-	3. Check Vertica versions
-	4. Prepare directories
-	5. Get network profiles
-	6. Bootstrap the database
-	7. Run the catalog editor
-	8. Start node
-	9. Create node
-	10. Reload spread
-	11. Transfer config files
-	12. Start all nodes of the database
-	13. Poll node startup
-	14. Create depot
-	15. Mark design ksafe
-	16. Install packages
-	17. sync catalog
+        1. Check NMA connectivity
+        2. Check to see if any dbs running
+        3. Check NMA versions
+        4. Prepare directories
+        5. Get network profiles
+        6. Bootstrap the database
+        7. Run the catalog editor
+        8. Start node
+        9. Create node
+        10. Reload spread
+        11. Transfer config files
+        12. Start all nodes of the database
+        13. Poll node startup
+        14. Create depot
+        15. Mark design ksafe
+        16. Install packages
+        17. sync catalog
 */
 
 //nolint:funlen // TODO this should be split into produceMandatoryInstructions and produceOptionalInstructions
-func produceCreateDBInstructions(vdb *VCoordinationDatabase, options *VCreateDatabaseOptions) ([]ClusterOp, error) {
+func produceInstructions(vdb *VCoordinationDatabase, options *VCreateDatabaseOptions) ([]ClusterOp, error) {
 	var instructions []ClusterOp
 
 	hosts := vdb.HostList
@@ -500,9 +499,6 @@ func writeClusterConfig(vdb *VCoordinationDatabase, configDir *string) error {
 	clusterConfig := MakeClusterConfig()
 	clusterConfig.DBName = vdb.Name
 	clusterConfig.Hosts = vdb.HostList
-	clusterConfig.CatalogPath = vdb.CatalogPrefix
-	clusterConfig.DataPath = vdb.DataPrefix
-	clusterConfig.DepotPath = vdb.DepotPrefix
 	for _, host := range vdb.HostList {
 		nodeConfig := NodeConfig{}
 		node, ok := vdb.HostNodeMap[host]
@@ -515,7 +511,6 @@ func writeClusterConfig(vdb *VCoordinationDatabase, configDir *string) error {
 		clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
 	}
 	clusterConfig.IsEon = vdb.IsEon
-	clusterConfig.Ipv6 = vdb.Ipv6
 
 	/* write config to a YAML file
 	 */
