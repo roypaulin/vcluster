@@ -37,6 +37,7 @@ type OpType int
 const (
 	CreateDB OpType = iota
 	StopDB
+	MyDB
 )
 
 func (op OpType) String() string {
@@ -45,6 +46,8 @@ func (op OpType) String() string {
 		return "Create DB"
 	case StopDB:
 		return "Stop DB"
+	case MyDB:
+		return "My DB"
 	}
 	return "unknown operation"
 }
