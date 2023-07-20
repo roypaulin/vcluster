@@ -142,7 +142,6 @@ func (vcc *VClusterCommands) VStartDatabase(options *VStartDatabaseOptions) erro
 //   - Start all nodes of the database
 //   - Poll node startup
 //   - Sync catalog (Eon mode only)
-
 func produceStartDBInstructions(startDBInfo *VStartDatabaseInfo, options *VStartDatabaseOptions) ([]ClusterOp, error) {
 	var instructions []ClusterOp
 

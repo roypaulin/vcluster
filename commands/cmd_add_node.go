@@ -37,9 +37,9 @@ type CmdAddNode struct {
 	CmdBase
 }
 
-func MakeCmdAddNode() CmdAddNode {
+func MakeCmdAddNode() *CmdAddNode {
 	// CmdAddNode
-	newCmd := CmdAddNode{}
+	newCmd := &CmdAddNode{}
 
 	// parser, used to parse command-line flags
 	newCmd.parser = flag.NewFlagSet("db_add_node", flag.ExitOnError)
@@ -55,6 +55,7 @@ func MakeCmdAddNode() CmdAddNode {
 		" Use it when you do not trust "+vclusterops.ConfigFileName))
 	addNodeOptions.HonorUserInput = newCmd.parser.Bool("honor-user-input", false,
 		util.GetOptionalFlagMsg("Forcefully use the user's input instead of reading the options from "+vclusterops.ConfigFileName))
+	// TODO remove this option after VER-88096 is done
 	newCmd.vnodeListStr = newCmd.parser.String("vnodes", "", util.GetOptionalFlagMsg(
 		"Comma-separated list of VNODE=HOST pairs part of the database nodes."+
 			" Use it when you do not trust "+vclusterops.ConfigFileName))
@@ -65,6 +66,7 @@ func MakeCmdAddNode() CmdAddNode {
 	addNodeOptions.DataPrefix = newCmd.parser.String("data-path", "", util.GetOptionalFlagMsg("Path of data directory"))
 
 	// Eon flags
+	// TODO remove this option after VER-88096 is done
 	newCmd.isEon = newCmd.parser.Bool("eon-mode", false, util.GetEonFlagMsg("indicate if the database is an Eon db."+
 		" Use it when you do not trust "+vclusterops.ConfigFileName))
 	addNodeOptions.SCName = newCmd.parser.String("subcluster", "", util.GetEonFlagMsg("The Name of subcluster for the new node"))

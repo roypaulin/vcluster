@@ -39,9 +39,9 @@ type CmdCreateDB struct {
 	CmdBase
 }
 
-func MakeCmdCreateDB() CmdCreateDB {
+func MakeCmdCreateDB() *CmdCreateDB {
 	// CmdCreateDB
-	newCmd := CmdCreateDB{}
+	newCmd := &CmdCreateDB{}
 
 	// parser, used to parse command-line flags
 	newCmd.parser = flag.NewFlagSet("create_db", flag.ExitOnError)

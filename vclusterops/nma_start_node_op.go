@@ -39,13 +39,7 @@ func (op *NMAStartNodeOp) updateRequestBody(execContext *OpEngineExecContext) er
 	op.hostRequestBodyMap = make(map[string]string)
 
 	for _, host := range op.hosts {
-		node, ok := execContext.nmaVDatabase.HostNodeMap[host]
-		if !ok {
-			return fmt.Errorf("[%s] the bootstrap node (%s) is not found from the catalog editor information: %+v",
-				op.name, host, execContext.nmaVDatabase)
-		}
-
-		marshaledCommand, err := json.Marshal(node.StartCommand)
+		marshaledCommand, err := json.Marshal(execContext.nmaVDatabase.HostNodeMap[host].StartCommand)
 		if err != nil {
 			return fmt.Errorf("[%s] fail to marshal start command, %w", op.name, err)
 		}

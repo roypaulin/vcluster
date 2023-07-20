@@ -521,7 +521,7 @@ func produceBasicCreateDBInstructions(vdb *VCoordinationDatabase, options *VCrea
 	newNodeHosts := util.SliceDiff(hosts, bootstrapHost)
 	if len(hosts) > 1 {
 		httpCreateNodeOp := MakeHTTPCreateNodeOp("HTTPCreateNodeOp", newNodeHosts, bootstrapHost,
-			true /* use password auth */, *options.UserName, options.Password, vdb)
+			true /* use password auth */, *options.UserName, options.Password, vdb, "")
 		instructions = append(instructions, &httpCreateNodeOp)
 	}
 
@@ -558,7 +558,7 @@ func produceAdditionalCreateDBInstructions(vdb *VCoordinationDatabase, options *
 	}
 
 	if vdb.UseDepot {
-		httpsCreateDepotOp := MakeHTTPSCreateDepotOp("HTTPSCreateDepotOp", vdb, bootstrapHost, true, username, options.Password)
+		httpsCreateDepotOp := MakeHTTPSCreateClusterDepotOp("HTTPSCreateDepotOp", vdb, bootstrapHost, true, username, options.Password)
 		instructions = append(instructions, &httpsCreateDepotOp)
 	}
 

@@ -30,7 +30,7 @@ type HTTPCreateNodeOp struct {
 
 func MakeHTTPCreateNodeOp(opName string, hosts []string, bootstrapHost []string,
 	useHTTPPassword bool, userName string, httpsPassword *string,
-	vdb *VCoordinationDatabase) HTTPCreateNodeOp {
+	vdb *VCoordinationDatabase, scName string) HTTPCreateNodeOp {
 	createNodeOp := HTTPCreateNodeOp{}
 	createNodeOp.name = opName
 	createNodeOp.hosts = bootstrapHost
@@ -39,6 +39,9 @@ func MakeHTTPCreateNodeOp(opName string, hosts []string, bootstrapHost []string,
 	createNodeOp.RequestParams["catalog-prefix"] = vdb.CatalogPrefix + "/" + vdb.Name
 	createNodeOp.RequestParams["data-prefix"] = vdb.DataPrefix + "/" + vdb.Name
 	createNodeOp.RequestParams["hosts"] = util.ArrayToString(hosts, ",")
+	if scName != "" {
+		createNodeOp.RequestParams["subcluster"] = scName
+	}
 	createNodeOp.useHTTPPassword = useHTTPPassword
 
 	util.ValidateUsernameAndPassword(useHTTPPassword, userName)
