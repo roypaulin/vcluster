@@ -91,6 +91,7 @@ func constructCmds() []ClusterCommand {
 		MakeCmdStopDB(),
 		MakeCmdDropDB(),
 		MakeListAllNodes(),
+		MakeCmdReIP(),
 		// sc-scope cmds
 		MakeCmdAddSubcluster(),
 		// node-scope cmds

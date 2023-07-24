@@ -15,7 +15,6 @@
 
 package vclusterops
 
-// OpEngineExecContext ?
 type OpEngineExecContext struct {
 	dispatcher             HTTPRequestDispatcher
 	networkProfiles        map[string]NetworkProfile

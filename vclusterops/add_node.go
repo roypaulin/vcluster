@@ -32,8 +32,13 @@ type VAddNodeOptions struct {
 	// Name of the subcluster that the new nodes will be added to
 	SCName *string
 	// A set of nodes(vnode - host) in the database
-	Nodes     map[string]string
+	Nodes map[string]string
+	// A (must be up) host that will be used to execute
+	// add_node operations.
+	InputHost string
 	DepotSize *string // like 10G
+	// Skip rebalance shards if true
+	SkipRebalanceShards *bool
 }
 
 func VAddNodeOptionsFactory() VAddNodeOptions {
@@ -49,6 +54,9 @@ func (o *VAddNodeOptions) SetDefaultValues() {
 
 	o.SCName = new(string)
 	o.NewHostNodeMap = make(map[string]VCoordinationNode)
+	o.SkipRebalanceShards = new(bool)
+	// true by default for the operator
+	*o.SkipRebalanceShards = true
 }
 
 func (o *VAddNodeOptions) validateRequiredOptions() error {
@@ -70,12 +78,9 @@ func (o *VAddNodeOptions) validateEonOptions(config *ClusterConfig) error {
 	if *o.SCName == "" {
 		return fmt.Errorf("must specify a subcluster name")
 	}
-	err := util.ValidateName(*o.SCName, "subcluster")
-	if err != nil {
-		return err
-	}
+
 	if *o.HonorUserInput {
-		err = util.ValidateRequiredAbsPath(o.DepotPrefix, "depot path")
+		err := util.ValidateRequiredAbsPath(o.DepotPrefix, "depot path")
 		if err != nil {
 			return err
 		}
@@ -86,9 +91,6 @@ func (o *VAddNodeOptions) validateEonOptions(config *ClusterConfig) error {
 func (o *VAddNodeOptions) validateExtraOptions() error {
 	if !*o.HonorUserInput {
 		return nil
-	}
-	if len(o.Nodes) != len(o.RawHosts) {
-		return fmt.Errorf("number of VNODE=HOST pairs should match the number of hosts")
 	}
 	// catalog prefix path
 	err := util.ValidateRequiredAbsPath(o.CatalogPrefix, "catalog path")
@@ -114,6 +116,8 @@ func (o *VAddNodeOptions) ParseNodeList(nodeListStr string) error {
 			return err
 		}
 		o.Nodes[k] = ip
+		// We also get the existing hosts ip
+		o.Hosts = append(o.Hosts, ip)
 	}
 	return nil
 }
@@ -135,10 +139,17 @@ func (o *VAddNodeOptions) validateParseOptions(config *ClusterConfig) error {
 }
 
 // analyzeOptions will modify some options based on what is chosen
-func (o *VAddNodeOptions) analyzeOptions() error {
-	err := o.resolveAllHosts()
+func (o *VAddNodeOptions) analyzeOptions() (err error) {
+	o.NewHosts, err = util.ResolveRawHostsToAddresses(o.NewHosts, o.Ipv6.ToBool())
 	if err != nil {
 		return err
+	}
+
+	if o.InputHost != "" {
+		o.InputHost, err = util.ResolveToOneIP(o.InputHost, o.Ipv6.ToBool())
+		if err != nil {
+			return err
+		}
 	}
 
 	// process correct catalog path, data path and depot path prefixes
@@ -158,22 +169,6 @@ func (o *VAddNodeOptions) ParseNewHostList(hosts string) error {
 
 	o.NewHosts = inputHostList
 	return nil
-}
-
-// resolveHosts resolve all hosts(new hosts and existing hosts) to IP addresses
-func (o *VAddNodeOptions) resolveAllHosts() (err error) {
-	ipv6 := o.Ipv6.ToBool()
-	// we analyze hostnames when HonorUserInput is set, otherwise we use hosts in yaml config
-	if *o.HonorUserInput {
-		// resolve RawHosts to be IP addresses
-		o.Hosts, err = util.ResolveRawHostsToAddresses(o.RawHosts, ipv6)
-		if err != nil {
-			return err
-		}
-	}
-	// resolve NewHosts to be IP addresses
-	o.NewHosts, err = util.ResolveRawHostsToAddresses(o.NewHosts, ipv6)
-	return err
 }
 
 func (o *VAddNodeOptions) validateAnalyzeOptions(config *ClusterConfig) error {
@@ -210,14 +205,14 @@ func (vcc *VClusterCommands) VAddNode(options *VAddNodeOptions) (VCoordinationDa
 
 	instructions, err := produceAddNodeInstructions(&vdb, options)
 	if err != nil {
-		vlog.LogPrintError("fail to produce add node instructions, %w", err)
+		vlog.LogPrintError("fail to produce add node instructions, %s", err)
 		return vdb, err
 	}
 
 	certs := HTTPSCerts{key: options.Key, cert: options.Cert, caCert: options.CaCert}
 	clusterOpEngine := MakeClusterOpEngine(instructions, &certs)
 	if runError := clusterOpEngine.Run(); runError != nil {
-		vlog.LogPrintError("fail to complete add node operation, %w", runError)
+		vlog.LogPrintError("fail to complete add node operation, %s", runError)
 		return vdb, runError
 	}
 	return vdb, nil
@@ -247,12 +242,16 @@ func (vcc *VClusterCommands) VAddNode(options *VAddNodeOptions) (VCoordinationDa
 func produceAddNodeInstructions(vdb *VCoordinationDatabase, options *VAddNodeOptions) ([]ClusterOp, error) {
 	var instructions []ClusterOp
 
-	// We are going to use this host to run the operations
-	// we assume that the user/config input hosts are up.
-	// There is alrady a Jira to improve how we get all nodes
-	// information of a running database.
-	inputHost := []string{
-		util.SliceDiff(vdb.HostList, options.NewHosts)[0],
+	var inputHost []string
+	if options.InputHost != "" {
+		// If the user specified an input host, we use it to execute the ops.
+		// It must be up.
+		inputHost = append(inputHost, options.InputHost)
+	} else {
+		// If an input host is not specified we use one from user/config host list.
+		// There is already a Jira(VER-88096) to improve how we get all nodes
+		// information of a running database.
+		inputHost = append(inputHost, util.SliceDiff(vdb.HostList, options.NewHosts)[0])
 	}
 	newNodeHosts := options.NewHosts
 	// Some operations need all of the new hosts, plus the initiator host.
@@ -260,10 +259,9 @@ func produceAddNodeInstructions(vdb *VCoordinationDatabase, options *VAddNodeOpt
 	allHosts := inputHost
 	allHosts = append(allHosts, newNodeHosts...)
 
-	nmaHealthOp := MakeNMAHealthOp("NMAHealthOp", allHosts)
-
+	nmaHealthOp := MakeNMAHealthOp(allHosts)
 	// require to have the same vertica version
-	nmaVerticaVersionOp := MakeNMAVerticaVersionOp("NMAVerticaVersionOp", allHosts, true)
+	nmaVerticaVersionOp := MakeNMAVerticaVersionOp(allHosts, true)
 
 	// when password is specified, we will use username/password to call https endpoints
 	usePassword := false
@@ -276,33 +274,32 @@ func produceAddNodeInstructions(vdb *VCoordinationDatabase, options *VAddNodeOpt
 	}
 	username := *options.UserName
 
-	httpCheckNodesExistOp := MakeHTTPCheckNodesExistOp("HTTPCheckNodesExistOp", inputHost,
+	httpCheckNodesExistOp := MakeHTTPCheckNodesExistOp(inputHost,
 		newNodeHosts, usePassword, username, options.Password)
 	instructions = append(instructions,
 		&nmaHealthOp,
 		&nmaVerticaVersionOp,
 		&httpCheckNodesExistOp)
-
 	if vdb.IsEon {
-		httpsFindSubclusterOrDefaultOp := MakeHTTPSFindSubclusterOrDefaultOp("HTTPSFindSubclusterOrDefaultOp",
+		httpsFindSubclusterOrDefaultOp := MakeHTTPSFindSubclusterOrDefaultOp(
 			inputHost, usePassword, username, options.Password, *options.SCName)
 		instructions = append(instructions, &httpsFindSubclusterOrDefaultOp)
 	}
-
-	nmaPrepareDirectoriesOp, err := MakeNMAPrepareDirectoriesOp("NMAPrepareDirectoriesOp", options.NewHostNodeMap)
+	nmaPrepareDirectoriesOp, err := MakeNMAPrepareDirectoriesOp(options.NewHostNodeMap)
 	if err != nil {
 		return instructions, err
 	}
-
-	nmaNetworkProfileOp := MakeNMANetworkProfileOp("NMANetworkProfileOp", allHosts)
-
-	httpCreateNodeOp := MakeHTTPCreateNodeOp("HTTPCreateNodeOp", newNodeHosts, inputHost,
+	nmaNetworkProfileOp := MakeNMANetworkProfileOp(allHosts)
+	httpCreateNodeOp := MakeHTTPCreateNodeOp(newNodeHosts, inputHost,
 		usePassword, *options.UserName, options.Password, vdb, *options.SCName)
+	httpsReloadSpreadOp := MakeHTTPSReloadSpreadOp(inputHost, true, username, options.Password)
 
-	httpsReloadSpreadOp := MakeHTTPSReloadSpreadOp("HTTPSReloadSpreadOp", inputHost, true, username, options.Password)
+	mapHostToCatalogPath := make(map[string]string)
+	for h, vnode := range vdb.HostNodeMap {
+		mapHostToCatalogPath[h] = vnode.CatalogPath
+	}
 
-	nmaFetchVdbFromCatEdOp, err := MakeNMAFetchVdbFromCatalogEditorOp(
-		"NMAFetchVdbFromCatalogEditorOp", vdb.HostNodeMap, inputHost)
+	nmaReadCatalogEditorOp, err := MakeNMAReadCatalogEditorOp(mapHostToCatalogPath, inputHost)
 	if err != nil {
 		return instructions, err
 	}
@@ -311,32 +308,29 @@ func produceAddNodeInstructions(vdb *VCoordinationDatabase, options *VAddNodeOpt
 		&nmaNetworkProfileOp,
 		&httpCreateNodeOp,
 		&httpsReloadSpreadOp,
-		&nmaFetchVdbFromCatEdOp,
+		&nmaReadCatalogEditorOp,
 	)
 
 	produceTransferConfigOps(&instructions, inputHost, nil, newNodeHosts, make(map[string]string))
-	nmaStartNewNodesOp := MakeNMAStartNodeOp("NMAStartNodeOp", newNodeHosts)
-	httpsPollNodeStateOp := MakeHTTPSPollNodeStateOp("HTTPSPollNodeStateOp", allHosts, usePassword, username, options.Password)
+	nmaStartNewNodesOp := MakeNMAStartNodeOp(newNodeHosts)
+	httpsPollNodeStateOp := MakeHTTPSPollNodeStateOp(allHosts, usePassword, username, options.Password)
 	instructions = append(instructions,
 		&nmaStartNewNodesOp,
 		&httpsPollNodeStateOp,
 	)
-
 	if vdb.UseDepot {
-		httpsCreateNodesDepotOp := MakeHTTPSCreateNodesDepotOp("HTTPSCreateNodesDepotOp", vdb,
+		httpsCreateNodesDepotOp := MakeHTTPSCreateNodesDepotOp(vdb,
 			newNodeHosts, usePassword, username, options.Password)
 		instructions = append(instructions, &httpsCreateNodesDepotOp)
 	}
-
 	if vdb.IsEon {
-		httpsSyncCatalogOp := MakeHTTPSSyncCatalogOp("HTTPSyncCatalogOp", inputHost, true, username, options.Password)
-		httpsRBSCShardsOp := MakeHTTPSRebalanceSubclusterShardsOp("HTTPSRebalanceSubclusterShardsOp",
-			inputHost, usePassword, username, options.Password, *options.SCName)
-		instructions = append(instructions,
-			&httpsSyncCatalogOp,
-			&httpsRBSCShardsOp,
-		)
+		httpsSyncCatalogOp := MakeHTTPSSyncCatalogOp(inputHost, true, username, options.Password)
+		instructions = append(instructions, &httpsSyncCatalogOp)
+		if !*options.SkipRebalanceShards {
+			httpsRBSCShardsOp := MakeHTTPSRebalanceSubclusterShardsOp(
+				inputHost, usePassword, username, options.Password, *options.SCName)
+			instructions = append(instructions, &httpsRBSCShardsOp)
+		}
 	}
-
 	return instructions, nil
 }

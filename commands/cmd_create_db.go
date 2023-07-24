@@ -183,7 +183,7 @@ func (c *CmdCreateDB) Run() error {
 	// write cluster information to the YAML config file
 	err := vclusterops.WriteClusterConfig(&vdb, c.createDBOptions.ConfigDirectory)
 	if err != nil {
-		vlog.LogPrintWarning("fail to write config file, details: %w", err)
+		vlog.LogPrintWarning("fail to write config file, details: %s", err)
 	}
 	vlog.LogPrintInfo("Created a database with name [%s]", vdb.Name)
 	return nil

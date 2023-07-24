@@ -17,9 +17,8 @@ package vclusterops
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 type NMAStartNodeOp struct {
@@ -27,9 +26,9 @@ type NMAStartNodeOp struct {
 	hostRequestBodyMap map[string]string
 }
 
-func MakeNMAStartNodeOp(opName string, hosts []string) NMAStartNodeOp {
+func MakeNMAStartNodeOp(hosts []string) NMAStartNodeOp {
 	nmaStartNodeOp := NMAStartNodeOp{}
-	nmaStartNodeOp.name = opName
+	nmaStartNodeOp.name = "NMAStartNodeOp"
 	nmaStartNodeOp.hosts = hosts
 
 	return nmaStartNodeOp
@@ -39,7 +38,13 @@ func (op *NMAStartNodeOp) updateRequestBody(execContext *OpEngineExecContext) er
 	op.hostRequestBodyMap = make(map[string]string)
 
 	for _, host := range op.hosts {
-		marshaledCommand, err := json.Marshal(execContext.nmaVDatabase.HostNodeMap[host].StartCommand)
+		node, ok := execContext.nmaVDatabase.HostNodeMap[host]
+		if !ok {
+			return fmt.Errorf("[%s] the bootstrap node (%s) is not found from the catalog editor information: %+v",
+				op.name, host, execContext.nmaVDatabase)
+		}
+
+		marshaledCommand, err := json.Marshal(node.StartCommand)
 		if err != nil {
 			return fmt.Errorf("[%s] fail to marshal start command, %w", op.name, err)
 		}
@@ -63,28 +68,28 @@ func (op *NMAStartNodeOp) setupClusterHTTPRequest(hosts []string) {
 	}
 }
 
-func (op *NMAStartNodeOp) Prepare(execContext *OpEngineExecContext) ClusterOpResult {
+func (op *NMAStartNodeOp) Prepare(execContext *OpEngineExecContext) error {
 	err := op.updateRequestBody(execContext)
 	if err != nil {
-		return MakeClusterOpResultException()
+		return err
 	}
 
 	execContext.dispatcher.Setup(op.hosts)
 	op.setupClusterHTTPRequest(op.hosts)
 
-	return MakeClusterOpResultPass()
+	return nil
 }
 
-func (op *NMAStartNodeOp) Execute(execContext *OpEngineExecContext) ClusterOpResult {
+func (op *NMAStartNodeOp) Execute(execContext *OpEngineExecContext) error {
 	if err := op.execute(execContext); err != nil {
-		return MakeClusterOpResultException()
+		return err
 	}
 
 	return op.processResult(execContext)
 }
 
-func (op *NMAStartNodeOp) Finalize(execContext *OpEngineExecContext) ClusterOpResult {
-	return MakeClusterOpResultPass()
+func (op *NMAStartNodeOp) Finalize(execContext *OpEngineExecContext) error {
+	return nil
 }
 
 type startNodeResponse struct {
@@ -92,8 +97,8 @@ type startNodeResponse struct {
 	ReturnCode int    `json:"return_code"`
 }
 
-func (op *NMAStartNodeOp) processResult(execContext *OpEngineExecContext) ClusterOpResult {
-	success := true
+func (op *NMAStartNodeOp) processResult(execContext *OpEngineExecContext) error {
+	var allErrs error
 
 	for host, result := range op.clusterHTTPRequest.ResultCollection {
 		op.logResponse(host, result)
@@ -106,21 +111,18 @@ func (op *NMAStartNodeOp) processResult(execContext *OpEngineExecContext) Cluste
 			responseObj := startNodeResponse{}
 			err := op.parseAndCheckResponse(host, result.content, &responseObj)
 			if err != nil {
-				success = false
+				allErrs = errors.Join(allErrs, err)
 				continue
 			}
 
 			if responseObj.ReturnCode != 0 {
-				vlog.LogError(`[%s] return_code should be 0 but got %d`, op.name, responseObj.ReturnCode)
-				success = false
+				err = fmt.Errorf(`[%s] return_code should be 0 but got %d`, op.name, responseObj.ReturnCode)
+				allErrs = errors.Join(allErrs, err)
 			}
 		} else {
-			success = false
+			allErrs = errors.Join(allErrs, result.err)
 		}
 	}
 
-	if success {
-		return MakeClusterOpResultPass()
-	}
-	return MakeClusterOpResultFail()
+	return allErrs
 }

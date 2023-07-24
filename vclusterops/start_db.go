@@ -145,9 +145,9 @@ func (vcc *VClusterCommands) VStartDatabase(options *VStartDatabaseOptions) erro
 func produceStartDBInstructions(startDBInfo *VStartDatabaseInfo, options *VStartDatabaseOptions) ([]ClusterOp, error) {
 	var instructions []ClusterOp
 
-	nmaHealthOp := MakeNMAHealthOp("NMAHealthOp", startDBInfo.Hosts)
+	nmaHealthOp := MakeNMAHealthOp(startDBInfo.Hosts)
 	// require to have the same vertica version
-	nmaVerticaVersionOp := MakeNMAVerticaVersionOp("NMAVerticaVersionOp", startDBInfo.Hosts, true)
+	nmaVerticaVersionOp := MakeNMAVerticaVersionOp(startDBInfo.Hosts, true)
 	// need username for https operations
 	usePassword := false
 	if options.Password != nil {
@@ -161,7 +161,7 @@ func produceStartDBInstructions(startDBInfo *VStartDatabaseInfo, options *VStart
 	checkDBRunningOp := MakeHTTPCheckRunningDBOp("HTTPCheckDBRunningOp", startDBInfo.Hosts,
 		usePassword, *options.UserName, options.Password, StartDB)
 
-	nmaReadCatalogEditorOp, err := MakeNMAReadCatalogEditorOp("NMAFetchLatestVdbFromCatalogEditorOp", startDBInfo.HostCatalogPath)
+	nmaReadCatalogEditorOp, err := MakeNMAReadCatalogEditorOp(startDBInfo.HostCatalogPath, []string{})
 	if err != nil {
 		return instructions, err
 	}
@@ -177,8 +177,8 @@ func produceStartDBInstructions(startDBInfo *VStartDatabaseInfo, options *VStart
 	// after we find host with the highest catalog and hosts that need to synchronize the catalog
 	produceTransferConfigOps(&instructions, nil, startDBInfo.Hosts, nil, startDBInfo.HostCatalogPath)
 
-	nmaStartNewNodesOp := MakeNMAStartNodeOp("NMAStartNodeOp", startDBInfo.Hosts)
-	httpsPollNodeStateOp := MakeHTTPSPollNodeStateOp("HTTPSPollNodeStateOp", startDBInfo.Hosts,
+	nmaStartNewNodesOp := MakeNMAStartNodeOp(startDBInfo.Hosts)
+	httpsPollNodeStateOp := MakeHTTPSPollNodeStateOp(startDBInfo.Hosts,
 		usePassword, *options.UserName, options.Password)
 
 	instructions = append(instructions,
@@ -187,7 +187,7 @@ func produceStartDBInstructions(startDBInfo *VStartDatabaseInfo, options *VStart
 	)
 
 	if options.IsEon.ToBool() {
-		httpsSyncCatalogOp := MakeHTTPSSyncCatalogOp("HTTPSyncCatalogOp", startDBInfo.Hosts, true, *options.UserName, options.Password)
+		httpsSyncCatalogOp := MakeHTTPSSyncCatalogOp(startDBInfo.Hosts, true, *options.UserName, options.Password)
 		instructions = append(instructions, &httpsSyncCatalogOp)
 	}
 
