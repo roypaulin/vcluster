@@ -143,8 +143,9 @@ func (op *HTTPSPollNodeStateOp) processResult(execContext *OpEngineExecContext) 
 type NodeInfo struct {
 	Address string `json:"address"`
 	// vnode name, e.g., v_dbname_node0001
-	Name  string `json:"name"`
-	State string `json:"state"`
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	CatalogPath string `json:"catalog_path"`
 }
 
 type NodesInfo struct {

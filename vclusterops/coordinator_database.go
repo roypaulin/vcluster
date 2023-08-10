@@ -56,6 +56,8 @@ type VCoordinationDatabase struct {
 
 	// more to add when useful
 	Ipv6 bool
+
+	UpPrimaryNodes []string
 }
 
 func MakeVCoordinationDatabase() VCoordinationDatabase {
@@ -172,6 +174,21 @@ func (vdb *VCoordinationDatabase) SetFromClusterConfig(clusterConfig *ClusterCon
 	}
 }
 
+// SetFromVCoordinationDatabase will copy a VCoordinationDatabase
+// struct into another. The copy will contain a subset of nodes
+// corresponding to the given slice of nodes.
+func (vdb *VCoordinationDatabase) SetFromVCoordinationDatabase(
+	vdbOrig *VCoordinationDatabase, targetHosts []string,
+) {
+	vdb.Name = vdbOrig.Name
+	vdb.CatalogPrefix = vdbOrig.CatalogPrefix
+	vdb.DataPrefix = vdbOrig.DataPrefix
+	vdb.DepotPrefix = vdbOrig.DepotPrefix
+	vdb.UseDepot = vdbOrig.UseDepot
+	vdb.HostList = targetHosts
+	vdb.HostNodeMap = util.FilterMapByKey(vdbOrig.HostNodeMap, targetHosts)
+}
+
 // setHostNodeMap gets a map of nodes(set of {name - address}), builds a VCoordinationNode
 // struct, for each of them, and adds it to HostNodeMap.
 func (vdb *VCoordinationDatabase) setHostNodeMap(vnodes map[string]string) {
@@ -250,6 +267,8 @@ type VCoordinationNode struct {
 	Port int
 	// default should be ipv4
 	ControlAddressFamily string
+	IsPrimary            bool
+	State                string
 }
 
 func MakeVCoordinationNode() VCoordinationNode {

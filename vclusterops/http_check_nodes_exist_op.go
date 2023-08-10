@@ -20,8 +20,16 @@ import (
 	"fmt"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
+
+type CheckNodesExistCallerType int
+
+const (
+	AddNode CheckNodesExistCallerType = iota
+	RemoveNode
+)
+
+const emptySubcluster = ""
 
 // HTTPCheckNodesExistOp defines an operation to get the
 // node states and check if some hosts are already part
@@ -31,6 +39,16 @@ type HTTPCheckNodesExistOp struct {
 	OpHTTPBase
 	// The IP addresses of the hosts whose existence we want to check
 	targetHosts []string
+	caller      CheckNodesExistCallerType
+}
+
+type NodeInfoEon struct {
+	NodeInfo
+	Subcluster string `json:"subcluster_name"`
+}
+
+type NodesInfoEon struct {
+	NodeList []NodeInfoEon `json:"node_list"`
 }
 
 // makeHTTPCheckNodesExistOp will make a https op that check if new nodes exists in current database
@@ -39,9 +57,11 @@ func makeHTTPCheckNodesExistOp(
 	targetHosts []string,
 	useHTTPPassword bool,
 	userName string,
-	httpsPassword *string) (HTTPCheckNodesExistOp, error) {
+	httpsPassword *string,
+	caller CheckNodesExistCallerType) (HTTPCheckNodesExistOp, error) {
 	nodeStateChecker := HTTPCheckNodesExistOp{}
 	nodeStateChecker.name = "HTTPCheckNodesExistOp"
+	nodeStateChecker.caller = caller
 	// The hosts are the ones we are going to talk to.
 	// as if any of the hosts is responsive, spread can give us the info of all nodes.
 	nodeStateChecker.hosts = hosts
@@ -109,7 +129,7 @@ func (op *HTTPCheckNodesExistOp) processResult(_ *OpEngineExecContext) error {
 		}
 
 		// parse the /nodes endpoint response
-		nodesInfo := NodesInfo{}
+		nodesInfo := NodesInfoEon{}
 		err := op.parseAndCheckResponse(host, result.content, &nodesInfo)
 		if err != nil {
 			err = fmt.Errorf("[%s] fail to parse result on host %s, details: %w",
@@ -117,9 +137,26 @@ func (op *HTTPCheckNodesExistOp) processResult(_ *OpEngineExecContext) error {
 			allErrs = errors.Join(allErrs, err)
 			continue
 		}
-		// We check if any of the new nodes already exist in the database
-		if op.checkNodesExist(nodesInfo.NodeList) {
-			return errors.New("new node already exists in the database")
+
+		doNodesExist := op.checkNodesExist(nodesInfo.NodeList)
+		switch {
+		case op.caller == AddNode:
+			if doNodesExist {
+				return errors.New("some of the hosts to add already exists in the database")
+			}
+		case op.caller == RemoveNode:
+			if !doNodesExist {
+				return errors.New("some of the nodes to remove do not exist in the database")
+			}
+			// in Eon mode, every node is assigned to a subcluster, so an empty
+			// subcluster means it is not eon.
+			if nodesInfo.NodeList[0].Subcluster == emptySubcluster {
+				// In enterprise mode, we need all nodes to be up or in
+				// standby in order to drop a node.
+				if op.checkDownNode(nodesInfo.NodeList) {
+					return errors.New("all nodes must be up or standby")
+				}
+			}
 		}
 		return nil
 	}
@@ -130,9 +167,9 @@ func (op *HTTPCheckNodesExistOp) finalize(_ *OpEngineExecContext) error {
 	return nil
 }
 
-// checkNodesExist return true if at least one of the new hosts
+// checkNodesExist return true if at least one of the target hosts
 // already exists in the database.
-func (op *HTTPCheckNodesExistOp) checkNodesExist(nodes []NodeInfo) bool {
+func (op *HTTPCheckNodesExistOp) checkNodesExist(nodes []NodeInfoEon) bool {
 	// verify the new nodes do not exist in current database
 	hostSet := make(map[string]struct{})
 	for _, host := range op.targetHosts {
@@ -144,9 +181,17 @@ func (op *HTTPCheckNodesExistOp) checkNodesExist(nodes []NodeInfo) bool {
 			dupHosts = append(dupHosts, host.Address)
 		}
 	}
-	if len(dupHosts) == 0 {
-		return false
+
+	return len(dupHosts) != 0
+}
+
+// checkDownNode returns true if at least one of the db nodes
+// is down.
+func (op *HTTPCheckNodesExistOp) checkDownNode(nodes []NodeInfoEon) bool {
+	for _, host := range nodes {
+		if host.State == util.NodeDownState {
+			return true
+		}
 	}
-	vlog.LogPrintError("[%s] new nodes %v already exist in the database", op.name, dupHosts)
-	return true
+	return false
 }

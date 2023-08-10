@@ -96,6 +96,7 @@ func constructCmds() []ClusterCommand {
 		MakeCmdAddSubcluster(),
 		// node-scope cmds
 		MakeCmdAddNode(),
+		MakeCmdRemoveNode(),
 		MakeCmdRestartNodes(),
 		// others
 		MakeCmdHelp(),

@@ -34,7 +34,8 @@ type HTTPSMarkDesignKSafeOp struct {
 	ksafeValue    int
 }
 
-func makeHTTPSMarkDesignKSafeOp(hosts []string,
+func makeHTTPSMarkDesignKSafeOp(
+	hosts []string,
 	useHTTPPassword bool,
 	userName string,
 	httpsPassword *string,

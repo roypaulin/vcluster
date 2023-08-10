@@ -177,6 +177,14 @@ func TestMapKeyDiff(t *testing.T) {
 	assert.Equal(t, expected, actual)
 }
 
+func TestFilterMapByKey(t *testing.T) {
+	a := map[string]int{"1": 1, "2": 2}
+	b := map[string]int{"1": 1, "3": 3, "4": 4, "2": 2}
+	keys := []string{"1", "2"}
+	c := FilterMapByKey(b, keys)
+	assert.EqualValues(t, a, c)
+}
+
 func TestGetEnv(t *testing.T) {
 	key := "NO_SUCH_ENV"
 	fallback := "test"

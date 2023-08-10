@@ -85,6 +85,19 @@ func MapKeyDiff[M ~map[K]V, K comparable, V any](m, n M) []K {
 	return diff
 }
 
+// FilterMapByKey, given a map and a slice of keys, returns a map,
+// which is a subset of the original, that contains only keys in
+// from the given slice.
+func FilterMapByKey[M ~map[K]V, K comparable, V any](m M, n []K) M {
+	result := make(M)
+	for _, k := range n {
+		if v, found := m[k]; found {
+			result[k] = v
+		}
+	}
+	return result
+}
+
 func CheckPathExist(filePath string) bool {
 	_, err := os.Stat(filePath)
 	return !os.IsNotExist(err)

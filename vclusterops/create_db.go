@@ -25,11 +25,6 @@ import (
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
-const (
-	ksafetyThreshold = 3
-	ksafeValue       = 1
-)
-
 // A good rule of thumb is to use normal strings unless you need nil.
 // Normal strings are easier and safer to use in Go.
 type VCreateDatabaseOptions struct {
@@ -504,7 +499,7 @@ func produceBasicCreateDBInstructions(vdb *VCoordinationDatabase, options *VCrea
 		return instructions, err
 	}
 
-	nmaStartNodeOp := makeNMAStartNodeOp(bootstrapHost)
+	nmaStartNodeOp := makeNMAStartNodeOp(bootstrapHost, nil)
 
 	httpsPollBootstrapNodeStateOp, err := makeHTTPSPollNodeStateOp(bootstrapHost, true, *options.UserName, options.Password)
 	if err != nil {
@@ -546,8 +541,8 @@ func produceBasicCreateDBInstructions(vdb *VCoordinationDatabase, options *VCrea
 
 	if len(hosts) > 1 {
 		instructions = append(instructions, &nmaReadCatalogEditorOp)
-		produceTransferConfigOps(&instructions, bootstrapHost, hosts, nil)
-		nmaStartNewNodesOp := makeNMAStartNodeOp(newNodeHosts)
+		produceTransferConfigOps(&instructions, bootstrapHost, hosts, nil, nil)
+		nmaStartNewNodesOp := makeNMAStartNodeOp(newNodeHosts, nil)
 		instructions = append(instructions, &nmaStartNewNodesOp)
 	}
 
@@ -580,7 +575,7 @@ func produceAdditionalCreateDBInstructions(vdb *VCoordinationDatabase, options *
 
 	if len(hosts) >= ksafetyThreshold {
 		httpsMarkDesignKSafeOp, err := makeHTTPSMarkDesignKSafeOp(bootstrapHost, true, username,
-			options.Password, ksafeValue)
+			options.Password, ksafeValueOne)
 		if err != nil {
 			return instructions, err
 		}

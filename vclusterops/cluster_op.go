@@ -91,6 +91,11 @@ func (hostResult *HostHTTPResult) IsUnauthorizedRequest() bool {
 	return hostResult.statusCode == UnauthorizedCode
 }
 
+// IsSuccess returns true if status code is 200
+func (hostResult *HostHTTPResult) IsSuccess() bool {
+	return hostResult.statusCode == SuccessCode
+}
+
 // check only password and certificate for start_db
 func (hostResult *HostHTTPResult) IsPasswordandCertificateError() bool {
 	if !hostResult.IsUnauthorizedRequest() {

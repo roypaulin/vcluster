@@ -156,10 +156,7 @@ func (o *VAddNodeOptions) analyzeOptions() (err error) {
 		}
 	}
 
-	// process correct catalog path, data path and depot path prefixes
-	*o.CatalogPrefix = util.GetCleanPath(*o.CatalogPrefix)
-	*o.DataPrefix = util.GetCleanPath(*o.DataPrefix)
-	*o.DepotPrefix = util.GetCleanPath(*o.DepotPrefix)
+	o.cleanPaths()
 	return nil
 }
 
@@ -262,7 +259,7 @@ func produceAddNodeInstructions(vdb *VCoordinationDatabase,
 	nmaVerticaVersionOp := makeNMAVerticaVersionOp(allHosts, true)
 
 	httpCheckNodesExistOp, err := makeHTTPCheckNodesExistOp(inputHost,
-		newNodeHosts, usePassword, username, options.Password)
+		newNodeHosts, usePassword, username, options.Password, AddNode)
 	if err != nil {
 		return instructions, err
 	}
@@ -307,8 +304,8 @@ func produceAddNodeInstructions(vdb *VCoordinationDatabase,
 		&nmaReadCatalogEditorOp,
 	)
 
-	produceTransferConfigOps(&instructions, inputHost, nil, newNodeHosts)
-	nmaStartNewNodesOp := makeNMAStartNodeOp(newNodeHosts)
+	produceTransferConfigOps(&instructions, inputHost, nil, newNodeHosts, nil)
+	nmaStartNewNodesOp := makeNMAStartNodeOp(newNodeHosts, nil)
 	httpsPollNodeStateOp, err := makeHTTPSPollNodeStateOp(allHosts, usePassword, username, options.Password)
 	if err != nil {
 		return instructions, err
