@@ -309,8 +309,13 @@ func (opt *DatabaseOptions) getDepotAndDataPrefix(config *ClusterConfig) (depotP
 	depotPrefix = config.DepotPath
 	dataPrefix = config.DataPath
 	// if HonorUserInput is set, we choose the user input
-	if *opt.DepotPrefix != "" && *opt.DataPrefix == "" && *opt.HonorUserInput {
+	if !*opt.HonorUserInput {
+		return depotPrefix, dataPrefix
+	}
+	if *opt.DepotPrefix != "" {
 		depotPrefix = *opt.DepotPrefix
+	}
+	if *opt.DataPrefix != "" {
 		dataPrefix = *opt.DataPrefix
 	}
 	return depotPrefix, dataPrefix

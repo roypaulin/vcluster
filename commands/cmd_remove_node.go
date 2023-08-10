@@ -119,7 +119,7 @@ func (c *CmdRemoveNode) Run() error {
 	remainingHosts := util.SliceDiff(vdb.HostList, c.removeNodeOptions.HostsToRemove)
 	vdbUpdate := vclusterops.MakeVCoordinationDatabase()
 	// we create a new vdb that does not contain the removed hosts.
-	vdbUpdate.SetFromVCoordinationDatabase(vdb, remainingHosts)
+	vdbUpdate.SetFromVCoordinationDatabase(&vdb, remainingHosts)
 	// write cluster information to the YAML config file.
 	err = vclusterops.WriteClusterConfig(&vdbUpdate, c.removeNodeOptions.ConfigDirectory)
 	if err != nil {

@@ -17,6 +17,7 @@ package vclusterops
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
@@ -108,7 +109,7 @@ func (o *VRemoveNodeOptions) analyzeOptions() (err error) {
 	return nil
 }
 
-func (o *VRemoveNodeOptions) ValidateAnalyzeOptions() error {
+func (o *VRemoveNodeOptions) validateAnalyzeOptions() error {
 	if err := o.validateParseOptions(); err != nil {
 		return err
 	}
@@ -119,16 +120,18 @@ func (o *VRemoveNodeOptions) ValidateAnalyzeOptions() error {
 	return o.SetUsePassword()
 }
 
-func (vcc *VClusterCommands) VRemoveNode(options *VRemoveNodeOptions) (*VCoordinationDatabase, error) {
+func (vcc *VClusterCommands) VRemoveNode(options *VRemoveNodeOptions) (VCoordinationDatabase, error) {
+	vdb := MakeVCoordinationDatabase()
+
 	config, err := options.GetDBConfig()
 	if err != nil {
-		return nil, err
+		return vdb, err
 	}
 
 	// validate and analyze options
-	err = options.ValidateAnalyzeOptions()
+	err = options.validateAnalyzeOptions()
 	if err != nil {
-		return nil, err
+		return vdb, err
 	}
 
 	// get db name and hosts from config file and options
@@ -139,45 +142,65 @@ func (vcc *VClusterCommands) VRemoveNode(options *VRemoveNodeOptions) (*VCoordin
 	*options.DepotPrefix, *options.DataPrefix = options.getDepotAndDataPrefix(config)
 	*options.CatalogPrefix = options.GetCatalogPrefix(config)
 
-	vdb := MakeVCoordinationDatabase()
 	err = GetVDBFromRunningDB(&vdb, &options.DatabaseOptions)
 	if err != nil {
-		return nil, err
-	}
-	if *options.HonorUserInput && vdb.IsEon {
-		// checking this here because now we have got eon value from
-		// the running db. This will be removed once we are able to get
-		// depotPrefix from the db.
-		err = util.ValidateRequiredAbsPath(options.DepotPrefix, "depot path")
-		if err != nil {
-			return nil, err
-		}
+		return vdb, err
 	}
 
-	vdb.DataPrefix = *options.DataPrefix
-	if *options.DepotPrefix != "" {
-		vdb.UseDepot = true
-		vdb.DepotPrefix = *options.DepotPrefix
+	err = completeVDBSetting(&vdb, options)
+	if err != nil {
+		return vdb, err
 	}
 
 	err = options.setInitiator(vdb.UpPrimaryNodes)
 	if err != nil {
-		return nil, err
+		return vdb, err
 	}
 
 	instructions, err := produceRemoveNodeInstructions(&vdb, options)
 	if err != nil {
 		vlog.LogPrintError("fail to produce remove node instructions, %s", err)
-		return nil, err
+		return vdb, err
 	}
 
 	certs := HTTPSCerts{key: options.Key, cert: options.Cert, caCert: options.CaCert}
 	clusterOpEngine := MakeClusterOpEngine(instructions, &certs)
 	if runError := clusterOpEngine.Run(); runError != nil {
 		vlog.LogPrintError("fail to complete remove node operation, %s", runError)
-		return nil, runError
+		return vdb, runError
 	}
-	return &vdb, nil
+	return vdb, nil
+}
+
+// completeVDBSetting sets some VCoordinationDatabase fileds we cannot get yet
+// from db. We take those values from options.
+func completeVDBSetting(vdb *VCoordinationDatabase, options *VRemoveNodeOptions) error {
+	vdb.DataPrefix = *options.DataPrefix
+	hostNodeMap := make(map[string]VCoordinationNode)
+
+	if *options.DepotPrefix == "" {
+		return nil
+	}
+	if *options.HonorUserInput && vdb.IsEon {
+		// checking this here because now we have got eon value from
+		// the running db. This will be removed once we are able to get
+		// depotPrefix from the db.
+		err := util.ValidateRequiredAbsPath(options.DepotPrefix, "depot path")
+		if err != nil {
+			return err
+		}
+	}
+	vdb.DepotPrefix = *options.DepotPrefix
+	// we set the depot path manually because there is not yet an endpoint for
+	// that. This is useful for NMADeleteDirectoriesOp.
+	for h := range vdb.HostNodeMap {
+		vnode := vdb.HostNodeMap[h]
+		depotSuffix := fmt.Sprintf("%s_depot", vnode.Name)
+		vnode.DepotPath = filepath.Join(vdb.DepotPrefix, vdb.Name, depotSuffix)
+		hostNodeMap[h] = vnode
+	}
+	vdb.HostNodeMap = hostNodeMap
+	return nil
 }
 
 // produceRemoveNodeInstructions will build a list of instructions to execute for
