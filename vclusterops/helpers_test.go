@@ -60,14 +60,14 @@ func TestForgetInitiatorHost(t *testing.T) {
 	hostsToSkip2 := []string{"10.0.0.0", "10.0.0.1"}
 
 	// successfully picks an initiator
-	initiatorHost := getInitiatorHost(nodesList1, hostsToSkip1)
+	initiatorHost, _ := getInitiatorHost(nodesList1, hostsToSkip1)
 	assert.Equal(t, initiatorHost, "10.0.0.0")
-	initiatorHost = getInitiatorHost(nodesList1, hostsToSkip2)
+	initiatorHost, _ = getInitiatorHost(nodesList1, hostsToSkip2)
 	assert.Equal(t, initiatorHost, "10.0.0.2")
 
 	// returns empty string because there is no primary up node that is not
 	// in the list of hosts to skip.
 	hostsToSkip1 = nodesList1
-	initiatorHost = getInitiatorHost(nodesList1, hostsToSkip1)
+	initiatorHost, _ = getInitiatorHost(nodesList1, hostsToSkip1)
 	assert.Equal(t, initiatorHost, "")
 }

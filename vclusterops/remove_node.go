@@ -18,7 +18,6 @@ package vclusterops
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
@@ -150,7 +149,7 @@ func (vcc *VClusterCommands) VRemoveNode(options *VRemoveNodeOptions) (VCoordina
 		return vdb, err
 	}
 
-	err = completeVDBSetting(&vdb, options)
+	err = options.completeVDBSetting(&vdb)
 	if err != nil {
 		return vdb, err
 	}
@@ -188,7 +187,7 @@ func (vcc *VClusterCommands) VRemoveNode(options *VRemoveNodeOptions) (VCoordina
 //   - Check the existence of the nodes to remove
 //   - Check if all nodes are up or standby (enterprise only)
 func checkRemoveNodeRequirements(vdb *VCoordinationDatabase, hostsToRemove []string) error {
-	if !vdb.doNodesExist(hostsToRemove) {
+	if !vdb.doNodesExist(hostsToRemove, len(hostsToRemove)) {
 		return errors.New("some of the nodes to remove do not exist in the database")
 	}
 	if !vdb.IsEon {
@@ -202,29 +201,28 @@ func checkRemoveNodeRequirements(vdb *VCoordinationDatabase, hostsToRemove []str
 
 // completeVDBSetting sets some VCoordinationDatabase fields we cannot get yet
 // from the https endpoints. We set those fields from options.
-func completeVDBSetting(vdb *VCoordinationDatabase, options *VRemoveNodeOptions) error {
-	vdb.DataPrefix = *options.DataPrefix
+func (o *VRemoveNodeOptions) completeVDBSetting(vdb *VCoordinationDatabase) error {
+	vdb.DataPrefix = *o.DataPrefix
 
-	if *options.DepotPrefix == "" {
+	if *o.DepotPrefix == "" {
 		return nil
 	}
-	if *options.HonorUserInput && vdb.IsEon {
+	if *o.HonorUserInput && vdb.IsEon {
 		// checking this here because now we have got eon value from
 		// the running db. This will be removed once we are able to get
 		// the depot path from db through an https endpoint(VER-88122).
-		err := util.ValidateRequiredAbsPath(options.DepotPrefix, "depot path")
+		err := util.ValidateRequiredAbsPath(o.DepotPrefix, "depot path")
 		if err != nil {
 			return err
 		}
 	}
-	vdb.DepotPrefix = *options.DepotPrefix
+	vdb.DepotPrefix = *o.DepotPrefix
 	hostNodeMap := make(map[string]VCoordinationNode)
 	// we set the depot path manually because there is not yet an https endpoint for
 	// that(VER-88122). This is useful for NMADeleteDirectoriesOp.
 	for h := range vdb.HostNodeMap {
 		vnode := vdb.HostNodeMap[h]
-		depotSuffix := fmt.Sprintf("%s_depot", vnode.Name)
-		vnode.DepotPath = filepath.Join(vdb.DepotPrefix, vdb.Name, depotSuffix)
+		vnode.DepotPath = vdb.genDepotPath(vnode.Name)
 		hostNodeMap[h] = vnode
 	}
 	vdb.HostNodeMap = hostNodeMap
@@ -377,9 +375,9 @@ func produceDropNodeOps(instructions *[]ClusterOp, targetHosts, hosts []string,
 // setInitiator sets the initiator as the first primary up node that is not
 // in the list of hosts to remove.
 func (o *VRemoveNodeOptions) setInitiator(primaryUpNodes []string) error {
-	initiatorHost := getInitiatorHost(primaryUpNodes, o.HostsToRemove)
-	if initiatorHost == "" {
-		return fmt.Errorf("could not find any primary up nodes that is not to be removed")
+	initiatorHost, err := getInitiatorHost(primaryUpNodes, o.HostsToRemove)
+	if err != nil {
+		return err
 	}
 	o.Initiator = initiatorHost
 	return nil

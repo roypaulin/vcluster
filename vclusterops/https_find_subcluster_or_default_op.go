@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
@@ -37,16 +36,10 @@ func makeHTTPSFindSubclusterOrDefaultOp(hosts []string, useHTTPPassword bool,
 	op.hosts = hosts
 	op.scName = scName
 
-	op.useHTTPPassword = useHTTPPassword
-	if useHTTPPassword {
-		err := util.ValidateUsernameAndPassword(op.name, useHTTPPassword, userName)
-		if err != nil {
-			return op, err
-		}
-		op.userName = userName
-		op.httpsPassword = httpsPassword
-	}
-	return op, nil
+	err := op.validateAndSetUsernameAndPassword(op.name, useHTTPPassword, userName,
+		httpsPassword)
+
+	return op, err
 }
 
 func (op *HTTPSFindSubclusterOrDefaultOp) setupClusterHTTPRequest(hosts []string) error {
