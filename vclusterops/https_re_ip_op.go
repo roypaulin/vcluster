@@ -53,6 +53,9 @@ func makeHTTPSReIPOp(nodeNamesList, hostToReIP []string,
 }
 
 func (op *httpsReIPOp) setupClusterHTTPRequest(hosts []string) error {
+	if len(op.upHosts) < len(hosts) {
+		return fmt.Errorf("aborting because of cluster quorum loss in the middle of restart_node")
+	}
 	for i, host := range hosts {
 		httpRequest := hostHTTPRequest{}
 		httpRequest.Method = PutMethod
