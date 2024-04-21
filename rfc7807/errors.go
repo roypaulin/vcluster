@@ -192,4 +192,19 @@ var (
 		"Target path is not an absolute path",
 		http.StatusBadRequest,
 	)
+	AuthenticationError = newProblemID(
+		path.Join(errorEndpointsPrefix, "unauthorized-request"),
+		"Unauthorized-request",
+		http.StatusUnauthorized,
+	)
+	CatalogPathNotExistError = newProblemID(
+		path.Join(errorEndpointsPrefix, "catalog-path-not-exist-error"),
+		"Target path does not exist",
+		http.StatusBadRequest,
+	)
+	CECatalogDirEmptyError = newProblemID(
+		path.Join(errorEndpointsPrefix, "catalog-dir-empty-error"),
+		"Target directory is empty",
+		http.StatusInternalServerError,
+	)
 )

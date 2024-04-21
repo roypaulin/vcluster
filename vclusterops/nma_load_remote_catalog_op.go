@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 type nmaLoadRemoteCatalogOp struct {
@@ -50,11 +48,11 @@ type loadRemoteCatalogRequestData struct {
 	RestorePointID      string              `json:"restore_point_id,omitempty"`
 }
 
-func makeNMALoadRemoteCatalogOp(logger vlog.Printer, oldHosts []string, configurationParameters map[string]string,
+func makeNMALoadRemoteCatalogOp(oldHosts []string, configurationParameters map[string]string,
 	vdb *VCoordinationDatabase, timeout uint, restorePoint *RestorePointPolicy) nmaLoadRemoteCatalogOp {
 	op := nmaLoadRemoteCatalogOp{}
 	op.name = "NMALoadRemoteCatalogOp"
-	op.logger = logger.WithName(op.name)
+	op.description = "Load remote catalog"
 	op.hosts = vdb.HostList
 	op.oldHosts = oldHosts
 	op.configurationParameters = configurationParameters
@@ -104,15 +102,9 @@ func (op *nmaLoadRemoteCatalogOp) setupRequestBody(execContext *opEngineExecCont
 		requestData.NodeAddresses = nodeAddresses
 		requestData.Parameters = op.configurationParameters
 		if op.restorePoint != nil {
-			if op.restorePoint.Archive != nil {
-				requestData.RestorePointArchive = *op.restorePoint.Archive
-			}
-			if op.restorePoint.Index != nil {
-				requestData.RestorePointIndex = *op.restorePoint.Index
-			}
-			if op.restorePoint.ID != nil {
-				requestData.RestorePointID = *op.restorePoint.ID
-			}
+			requestData.RestorePointArchive = op.restorePoint.Archive
+			requestData.RestorePointIndex = op.restorePoint.Index
+			requestData.RestorePointID = op.restorePoint.ID
 		}
 
 		dataBytes, err := json.Marshal(requestData)

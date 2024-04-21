@@ -16,11 +16,8 @@
 package commands
 
 import (
-	"flag"
-	"fmt"
-
+	"github.com/spf13/cobra"
 	"github.com/vertica/vcluster/vclusterops"
-	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
@@ -42,59 +39,84 @@ func (c *CmdSandboxSubcluster) TypeName() string {
 	return "CmdSandboxSubcluster"
 }
 
-func makeCmdSandboxSubcluster() *CmdSandboxSubcluster {
+func makeCmdSandboxSubcluster() *cobra.Command {
+	// CmdSandboxSubcluster
 	newCmd := &CmdSandboxSubcluster{}
-	newCmd.parser = flag.NewFlagSet("sandbox_subcluster", flag.ExitOnError)
-	newCmd.sbOptions = vclusterops.VSandboxOptionsFactory()
+	opt := vclusterops.VSandboxOptionsFactory()
+	newCmd.sbOptions = opt
 
-	// required flags
-	newCmd.sbOptions.DBName = newCmd.parser.String("db-name", "", "The name of the database to run sandbox. May be omitted on k8s.")
-	newCmd.sbOptions.SCName = newCmd.parser.String("subcluster", "", "The name of the subcluster to be sandboxed")
-	newCmd.sbOptions.SandboxName = newCmd.parser.String("sandbox", "", "The name of the sandbox")
+	cmd := makeBasicCobraCmd(
+		newCmd,
+		sandboxSubCmd,
+		"Sandbox a subcluster",
+		`This subcommand sandboxes a subcluster in an existing Eon Mode database.
 
-	// optional flags
-	newCmd.sbOptions.Password = newCmd.parser.String("password", "",
-		util.GetOptionalFlagMsg("Database password. Consider using in single quotes to avoid shell substitution."))
-	newCmd.hostListStr = newCmd.parser.String("hosts", "", util.GetOptionalFlagMsg("Comma-separated list of hosts to participate in database."+
-		" Use it when you do not trust "+vclusterops.ConfigFileName))
-	newCmd.ipv6 = newCmd.parser.Bool("ipv6", false, "start database with with IPv6 hosts")
-	newCmd.sbOptions.HonorUserInput = newCmd.parser.Bool("honor-user-input", false,
-		util.GetOptionalFlagMsg("Forcefully use the user's input instead of reading the options from "+vclusterops.ConfigFileName))
-	newCmd.sbOptions.ConfigDirectory = newCmd.parser.String("config-directory", "",
-		util.GetOptionalFlagMsg("Directory where "+vclusterops.ConfigFileName+" is located"))
+Only secondary subclusters can be sandboxed. All hosts in the subcluster that
+you want to sandbox must be up.
 
-	return newCmd
+When you sandbox a subcluster, its hosts shut down and restart as part of the
+sandbox. A sandbox can contain multiple subclusters.
+
+You must provide the subcluster name with the --subcluster option and the
+sandbox name with the --sandbox option.
+		
+Examples:
+  # Sandbox a subcluster with config file
+  vcluster sandbox_subcluster --subcluster sc1 --sandbox sand \
+    --config /opt/vertica/config/vertica_cluster.yaml
+
+  # Sandbox a subcluster with user input
+  vcluster sandbox_subcluster --subcluster sc1 --sandbox sand \
+    --hosts 10.20.30.40,10.20.30.41,10.20.30.42 --db-name test_db
+`,
+		[]string{dbNameFlag, configFlag, hostsFlag, passwordFlag},
+	)
+
+	// local flags
+	newCmd.setLocalFlags(cmd)
+
+	// require name of subcluster to sandbox as well as the sandbox name
+	markFlagsRequired(cmd, []string{subclusterFlag, sandboxFlag})
+
+	return cmd
 }
 
-func (c *CmdSandboxSubcluster) CommandType() string {
-	return "sandbox_subcluster"
+// setLocalFlags will set the local flags the command has
+func (c *CmdSandboxSubcluster) setLocalFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(
+		&c.sbOptions.SCName,
+		subclusterFlag,
+		"",
+		"The name of the subcluster to be sandboxed",
+	)
+	cmd.Flags().StringVar(
+		&c.sbOptions.SandboxName,
+		sandboxFlag,
+		"",
+		"The name of the sandbox",
+	)
 }
 
 func (c *CmdSandboxSubcluster) Parse(inputArgv []string, logger vlog.Printer) error {
 	c.argv = inputArgv
-	err := c.ValidateParseArgv(c.CommandType(), logger)
-	if err != nil {
-		return err
-	}
+	logger.LogMaskedArgParse(c.argv)
+
 	return c.parseInternal(logger)
 }
 
 func (c *CmdSandboxSubcluster) parseInternal(logger vlog.Printer) error {
 	logger.Info("Called parseInternal()")
-	if c.parser == nil {
-		return fmt.Errorf("unexpected nil for CmdSandboxSubcluster.parser")
-	}
-	if !util.IsOptionSet(c.parser, "password") {
-		c.sbOptions.Password = nil
-	}
-	if !util.IsOptionSet(c.parser, "ipv6") {
-		c.CmdBase.ipv6 = nil
-	}
-	if !util.IsOptionSet(c.parser, "config-directory") {
-		c.sbOptions.ConfigDirectory = nil
+
+	err := c.getCertFilesFromCertPaths(&c.sbOptions.DatabaseOptions)
+	if err != nil {
+		return err
 	}
 
-	return c.ValidateParseBaseOptions(&c.sbOptions.DatabaseOptions)
+	err = c.ValidateParseBaseOptions(&c.sbOptions.DatabaseOptions)
+	if err != nil {
+		return err
+	}
+	return c.setDBPassword(&c.sbOptions.DatabaseOptions)
 }
 
 func (c *CmdSandboxSubcluster) Analyze(logger vlog.Printer) error {
@@ -102,18 +124,18 @@ func (c *CmdSandboxSubcluster) Analyze(logger vlog.Printer) error {
 	return nil
 }
 
-func (c *CmdSandboxSubcluster) Run(vcc vclusterops.VClusterCommands) error {
-	vcc.Log.PrintInfo("Running sandbox subcluster")
-	vcc.Log.Info("Calling method Run() for command " + c.CommandType())
+func (c *CmdSandboxSubcluster) Run(vcc vclusterops.ClusterCommands) error {
+	vcc.PrintInfo("Running sandbox subcluster")
+	vcc.LogInfo("Calling method Run() for command " + sandboxSubCmd)
 
 	options := c.sbOptions
-	// get config from vertica_cluster.yaml
-	config, err := options.GetDBConfig(vcc)
-	if err != nil {
-		return err
-	}
-	options.Config = config
-	err = vcc.VSandbox(&options)
-	vcc.Log.PrintInfo("Completed method Run() for command " + c.CommandType())
+
+	err := vcc.VSandbox(&options)
+	vcc.PrintInfo("Completed method Run() for command " + sandboxSubCmd)
 	return err
+}
+
+// SetDatabaseOptions will assign a vclusterops.DatabaseOptions instance to the one in CmdSandboxSubcluster
+func (c *CmdSandboxSubcluster) SetDatabaseOptions(opt *vclusterops.DatabaseOptions) {
+	c.sbOptions.DatabaseOptions = *opt
 }

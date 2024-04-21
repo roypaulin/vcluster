@@ -141,19 +141,19 @@ func TestGetCleanPath(t *testing.T) {
 	assert.Equal(t, res, "/data")
 }
 
-func TestSplitHosts(t *testing.T) {
+func TestParseHostList(t *testing.T) {
 	// positive case
-	hosts := "vnode1, vnode2"
-	res, err := SplitHosts(hosts)
-	expected := []string{"vnode1", "vnode2"}
+	hosts := []string{" vnode1 ", " vnode2", "vnode3 ", "  "}
+	err := ParseHostList(&hosts)
+	expected := []string{"vnode1", "vnode2", "vnode3"}
 	assert.Nil(t, err)
-	assert.Equal(t, res, expected)
+	assert.Equal(t, hosts, expected)
 
 	// negative case
-	hosts = " "
-	res, err = SplitHosts(hosts)
+	hosts = []string{"  "}
+	err = ParseHostList(&hosts)
 	assert.NotNil(t, err)
-	assert.Equal(t, res, []string{})
+	assert.Equal(t, err.Error(), "must specify a host or host list")
 }
 
 type testStruct struct {
@@ -186,6 +186,14 @@ func TestSliceDiff(t *testing.T) {
 	b := []string{"1", "3", "4"}
 	expected := []string{"2"}
 	actual := SliceDiff(a, b)
+	assert.Equal(t, expected, actual)
+}
+
+func TestSliceCommon(t *testing.T) {
+	a := []string{"3", "5", "4", "1", "2"}
+	b := []string{"5", "6", "7", "4", "3"}
+	expected := []string{"3", "4", "5"}
+	actual := SliceCommon(a, b)
 	assert.Equal(t, expected, actual)
 }
 
@@ -261,38 +269,10 @@ func TestValidateDBName(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid character in "+obj+" name: !")
 }
 
-func TestSetOptFlagHelpMsg(t *testing.T) {
-	msg := "The name of the database to be created"
-	finalMsg := "The name of the database to be created [Optional]"
-	assert.Equal(t, GetOptionalFlagMsg(msg), finalMsg)
-}
-
 func TestSetEonFlagHelpMsg(t *testing.T) {
 	msg := "Path to depot directory"
 	finalMsg := "[Eon only] Path to depot directory"
 	assert.Equal(t, GetEonFlagMsg(msg), finalMsg)
-}
-
-func TestParseConfigParams(t *testing.T) {
-	configParamsListStr := ""
-	configParams, err := ParseConfigParams(configParamsListStr)
-	assert.Nil(t, err)
-	assert.Nil(t, configParams)
-
-	configParamsListStr = "key1=val1,key2"
-	configParams, err = ParseConfigParams(configParamsListStr)
-	assert.NotNil(t, err)
-	assert.Nil(t, configParams)
-
-	configParamsListStr = "key1=val1,=val2"
-	configParams, err = ParseConfigParams(configParamsListStr)
-	assert.NotNil(t, err)
-	assert.Nil(t, configParams)
-
-	configParamsListStr = "key1=val1,key2=val2"
-	configParams, err = ParseConfigParams(configParamsListStr)
-	assert.Nil(t, err)
-	assert.ObjectsAreEqualValues(configParams, map[string]string{"key1": "val1", "key2": "val2"})
 }
 
 func TestGenVNodeName(t *testing.T) {
@@ -371,4 +351,22 @@ func TestValidateCommunalStorageLocation(t *testing.T) {
 	// return error for an invalid s3 location with "///" as the path separator
 	err = ValidateCommunalStorageLocation("s3://vertica-fleeting///k8s/revive_eon_5")
 	assert.Error(t, err)
+}
+
+func TestIsEmptyOrValidTimeStr(t *testing.T) {
+	const layout = "2006-01-02 15:04:05.000000"
+	testTimeString := ""
+
+	// positive cases
+	_, err := IsEmptyOrValidTimeStr(layout, testTimeString)
+	assert.NoError(t, err)
+
+	testTimeString = "2023-05-02 14:10:31.038289"
+	_, err = IsEmptyOrValidTimeStr(layout, testTimeString)
+	assert.NoError(t, err)
+
+	// negative case
+	testTimeString = "invalid time"
+	_, err = IsEmptyOrValidTimeStr(layout, testTimeString)
+	assert.ErrorContains(t, err, "cannot parse")
 }

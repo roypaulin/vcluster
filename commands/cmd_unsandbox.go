@@ -16,11 +16,8 @@
 package commands
 
 import (
-	"flag"
-	"fmt"
-
+	"github.com/spf13/cobra"
 	"github.com/vertica/vcluster/vclusterops"
-	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
@@ -41,49 +38,84 @@ func (c *CmdUnsandboxSubcluster) TypeName() string {
 	return "CmdUnsandboxSubcluster"
 }
 
-func makeCmdUnsandboxSubcluster() *CmdUnsandboxSubcluster {
+func makeCmdUnsandboxSubcluster() *cobra.Command {
+	// CmdUnsandboxSubcluster
 	newCmd := &CmdUnsandboxSubcluster{}
-	newCmd.parser = flag.NewFlagSet("unsandbox", flag.ExitOnError)
-	newCmd.usOptions = vclusterops.VUnsandboxOptionsFactory()
+	opt := vclusterops.VUnsandboxOptionsFactory()
+	newCmd.usOptions = opt
 
-	// required flags
-	newCmd.usOptions.DBName = newCmd.parser.String("db-name", "", "The name of the database to run unsandboxing. May be omitted on k8s.")
-	newCmd.usOptions.SCName = newCmd.parser.String("subcluster", "", "The name of the subcluster to be unsandboxed")
+	cmd := makeBasicCobraCmd(
+		newCmd,
+		unsandboxSubCmd,
+		"Unsandbox a subcluster",
+		`This subcommand unsandboxes a subcluster in an existing Eon Mode database.
 
-	// optional flags
-	newCmd.usOptions.Password = newCmd.parser.String("password", "",
-		util.GetOptionalFlagMsg("Database password. Consider using in single quotes to avoid shell substitution."))
-	newCmd.hostListStr = newCmd.parser.String("hosts", "", util.GetOptionalFlagMsg("Comma-separated list of hosts to participate in database."+
-		" Use it when you do not trust "+vclusterops.ConfigFileName))
-	newCmd.ipv6 = newCmd.parser.Bool("ipv6", false, "start database with with IPv6 hosts")
-	newCmd.usOptions.HonorUserInput = newCmd.parser.Bool("honor-user-input", false,
-		util.GetOptionalFlagMsg("Forcefully use the user's input instead of reading the options from "+vclusterops.ConfigFileName))
-	newCmd.usOptions.ConfigDirectory = newCmd.parser.String("config-directory", "",
-		util.GetOptionalFlagMsg("Directory where "+vclusterops.ConfigFileName+" is located"))
+When you unsandbox a subcluster, its hosts shut down and restart as part of the
+main cluster.
 
-	return newCmd
+When all subclusters are removed from a sandbox, the sandbox catalog and
+metadata are deleted. To reuse the sandbox name, you must manually clean the 
+/metadata/<sandbox-name> directory in your communal storage location.
+To reuse the sandbox name, you must manually clean the /metadata/<sandbox-name>
+directory in your communal storage location.
+
+The comma-separated list of hosts passed to the --hosts option must include at
+least one up host in the main cluster.
+
+You must provide the subcluster name with the --subcluster option.
+
+Examples:
+  # Unsandbox a subcluster with config file
+  vcluster unsandbox_subcluster --subcluster sc1 \
+    --config /opt/vertica/config/vertica_cluster.yaml
+
+  # Unsandbox a subcluster with user input
+  vcluster unsandbox_subcluster --subcluster sc1 \
+    --hosts 10.20.30.40,10.20.30.41,10.20.30.42 --db-name test_db
+`,
+		[]string{dbNameFlag, configFlag, passwordFlag, hostsFlag},
+	)
+
+	// local flags
+	newCmd.setLocalFlags(cmd)
+
+	// require name of subcluster to unsandbox
+	markFlagsRequired(cmd, []string{subclusterFlag})
+
+	return cmd
 }
 
-func (c *CmdUnsandboxSubcluster) CommandType() string {
-	return "unsandbox_subcluster"
+// setLocalFlags will set the local flags the command has
+func (c *CmdUnsandboxSubcluster) setLocalFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(
+		&c.usOptions.SCName,
+		subclusterFlag,
+		"",
+		"The name of the subcluster to be unsandboxed",
+	)
 }
 
 func (c *CmdUnsandboxSubcluster) Parse(inputArgv []string, logger vlog.Printer) error {
 	c.argv = inputArgv
-	// from now on we use the internal copy of argv
+	logger.LogMaskedArgParse(c.argv)
+
 	return c.parseInternal(logger)
 }
 
+// ParseInternal parses internal commands for unsandboxed subclusters.
 func (c *CmdUnsandboxSubcluster) parseInternal(logger vlog.Printer) error {
-	if c.parser == nil {
-		return fmt.Errorf("unexpected nil for CmdUnsandboxSubcluster.parser")
+	logger.Info("Called parseInternal()")
+
+	err := c.getCertFilesFromCertPaths(&c.usOptions.DatabaseOptions)
+	if err != nil {
+		return err
 	}
-	logger.PrintInfo("Parsing Unsandboxing command input")
-	parseError := c.ParseArgv()
-	if parseError != nil {
-		return parseError
+
+	err = c.ValidateParseBaseOptions(&c.usOptions.DatabaseOptions)
+	if err != nil {
+		return err
 	}
-	return nil
+	return c.setDBPassword(&c.usOptions.DatabaseOptions)
 }
 
 func (c *CmdUnsandboxSubcluster) Analyze(logger vlog.Printer) error {
@@ -92,18 +124,18 @@ func (c *CmdUnsandboxSubcluster) Analyze(logger vlog.Printer) error {
 	return nil
 }
 
-func (c *CmdUnsandboxSubcluster) Run(vcc vclusterops.VClusterCommands) error {
-	vcc.Log.PrintInfo("Running unsandbox subcluster")
-	vcc.Log.Info("Calling method Run() for command " + c.CommandType())
+func (c *CmdUnsandboxSubcluster) Run(vcc vclusterops.ClusterCommands) error {
+	vcc.PrintInfo("Running unsandbox subcluster")
+	vcc.LogInfo("Calling method Run() for command " + unsandboxSubCmd)
 
 	options := c.usOptions
-	// get config from vertica_cluster.yaml
-	config, err := options.GetDBConfig(vcc)
-	if err != nil {
-		return err
-	}
-	options.Config = config
-	err = vcc.VUnsandbox(&options)
-	vcc.Log.PrintInfo("Completed method Run() for command " + c.CommandType())
+
+	err := vcc.VUnsandbox(&options)
+	vcc.PrintInfo("Completed method Run() for command " + unsandboxSubCmd)
 	return err
+}
+
+// SetDatabaseOptions will assign a vclusterops.DatabaseOptions instance to the one in CmdUnsandboxSubcluster
+func (c *CmdUnsandboxSubcluster) SetDatabaseOptions(opt *vclusterops.DatabaseOptions) {
+	c.usOptions.DatabaseOptions = *opt
 }

@@ -19,7 +19,6 @@ import (
 	"errors"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 type httpsMarkEphemeralNodeOp struct {
@@ -28,14 +27,14 @@ type httpsMarkEphemeralNodeOp struct {
 	targetNodeName string
 }
 
-func makeHTTPSMarkEphemeralNodeOp(logger vlog.Printer, nodeName string,
+func makeHTTPSMarkEphemeralNodeOp(nodeName string,
 	initiatorHost []string,
 	useHTTPPassword bool,
 	userName string,
 	httpsPassword *string) (httpsMarkEphemeralNodeOp, error) {
 	op := httpsMarkEphemeralNodeOp{}
 	op.name = "HTTPSMarkEphemeralNodeOp"
-	op.logger = logger.WithName(op.name)
+	op.description = "Change node type to ephemeral"
 	op.hosts = initiatorHost
 	op.targetNodeName = nodeName
 	op.useHTTPPassword = useHTTPPassword

@@ -21,16 +21,16 @@ import (
 	"strconv"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 // Timeout set to 30 seconds for each GET /v1/nodes/{node} call.
 // 30 seconds is long enough for normal http request.
 // If this timeout is reached, it might imply that the target IP is unreachable
-const httpRequestTimeoutSeconds = 30
+const defaultHTTPRequestTimeoutSeconds = 30
 const (
 	StartDBCmd CmdType = iota
 	StartNodeCmd
+	CreateDBCmd
 )
 
 type CmdType int
@@ -41,6 +41,8 @@ func (cmd CmdType) String() string {
 		return "start_db"
 	case StartNodeCmd:
 		return "restart_node"
+	case CreateDBCmd:
+		return "create_db"
 	}
 	return "unknown_operation"
 }
@@ -49,17 +51,21 @@ type httpsPollNodeStateOp struct {
 	opBase
 	opHTTPSBase
 	currentHost string
-	timeout     int
-	cmdType     CmdType
+	// The timeout for the entire operation
+	timeout int
+	// The timeout for each http request. Requests will be repeated if timeout hasn't been exceeded.
+	httpRequestTimeout int
+	cmdType            CmdType
 }
 
-func makeHTTPSPollNodeStateOpHelper(logger vlog.Printer, hosts []string,
+func makeHTTPSPollNodeStateOpHelper(hosts []string,
 	useHTTPPassword bool, userName string, httpsPassword *string) (httpsPollNodeStateOp, error) {
 	op := httpsPollNodeStateOp{}
 	op.name = "HTTPSPollNodeStateOp"
-	op.logger = logger.WithName(op.name)
+	op.description = fmt.Sprintf("Wait for %d node(s) to come up", len(hosts))
 	op.hosts = hosts
 	op.useHTTPPassword = useHTTPPassword
+	op.httpRequestTimeout = defaultHTTPRequestTimeoutSeconds
 
 	err := util.ValidateUsernameAndPassword(op.name, useHTTPPassword, userName)
 	if err != nil {
@@ -71,10 +77,10 @@ func makeHTTPSPollNodeStateOpHelper(logger vlog.Printer, hosts []string,
 	return op, nil
 }
 
-func makeHTTPSPollNodeStateOpWithTimeoutAndCommand(logger vlog.Printer, hosts []string,
+func makeHTTPSPollNodeStateOpWithTimeoutAndCommand(hosts []string,
 	useHTTPPassword bool, userName string, httpsPassword *string,
 	timeout int, cmdType CmdType) (httpsPollNodeStateOp, error) {
-	op, err := makeHTTPSPollNodeStateOpHelper(logger, hosts, useHTTPPassword, userName, httpsPassword)
+	op, err := makeHTTPSPollNodeStateOpHelper(hosts, useHTTPPassword, userName, httpsPassword)
 	if err != nil {
 		return op, err
 	}
@@ -83,10 +89,10 @@ func makeHTTPSPollNodeStateOpWithTimeoutAndCommand(logger vlog.Printer, hosts []
 	return op, nil
 }
 
-func makeHTTPSPollNodeStateOp(logger vlog.Printer, hosts []string,
+func makeHTTPSPollNodeStateOp(hosts []string,
 	useHTTPPassword bool, userName string,
 	httpsPassword *string) (httpsPollNodeStateOp, error) {
-	op, err := makeHTTPSPollNodeStateOpHelper(logger, hosts, useHTTPPassword, userName, httpsPassword)
+	op, err := makeHTTPSPollNodeStateOpHelper(hosts, useHTTPPassword, userName, httpsPassword)
 	if err != nil {
 		return op, err
 	}
@@ -100,7 +106,6 @@ func makeHTTPSPollNodeStateOp(logger vlog.Printer, hosts []string,
 }
 
 func (op *httpsPollNodeStateOp) getPollingTimeout() int {
-	// a negative value indicates no timeout and should never be used for this op
 	return util.Max(op.timeout, 0)
 }
 
@@ -108,7 +113,7 @@ func (op *httpsPollNodeStateOp) setupClusterHTTPRequest(hosts []string) error {
 	for _, host := range hosts {
 		httpRequest := hostHTTPRequest{}
 		httpRequest.Method = GetMethod
-		httpRequest.Timeout = httpRequestTimeoutSeconds
+		httpRequest.Timeout = op.httpRequestTimeout
 		httpRequest.buildHTTPSEndpoint("nodes/" + host)
 		if op.useHTTPPassword {
 			httpRequest.Password = op.httpsPassword
@@ -140,7 +145,7 @@ func (op *httpsPollNodeStateOp) finalize(_ *opEngineExecContext) error {
 }
 
 func (op *httpsPollNodeStateOp) processResult(execContext *opEngineExecContext) error {
-	op.logger.PrintWithIndent("[%s] expecting %d up host(s)", op.name, len(op.hosts))
+	op.logger.PrintInfo("[%s] expecting %d up host(s)", op.name, len(op.hosts))
 
 	err := pollState(op, execContext)
 	if err != nil {
@@ -173,11 +178,12 @@ func (op *httpsPollNodeStateOp) shouldStopPolling() (bool, error) {
 			case StartDBCmd, StartNodeCmd:
 				op.logger.PrintError("[%s] The credentials are incorrect. 'Catalog Sync' will not be executed.",
 					op.name)
-				return true, fmt.Errorf("[%s] wrong password/certificate for https service on host %s, but the nodes' startup have been in progress."+
+				return false, fmt.Errorf("[%s] wrong password/certificate for https service on host %s, but the nodes' startup have been in progress."+
 					"Please use vsql to check the nodes' status and manually run sync_catalog vsql command 'select sync_catalog()'", op.name, host)
+			case CreateDBCmd:
+				return true, fmt.Errorf("[%s] wrong password/certificate for https service on host %s",
+					op.name, host)
 			}
-			return true, fmt.Errorf("[%s] wrong password/certificate for https service on host %s",
-				op.name, host)
 		}
 		if result.isPassing() {
 			// parse the /nodes/{node} endpoint response
@@ -206,11 +212,13 @@ func (op *httpsPollNodeStateOp) shouldStopPolling() (bool, error) {
 	}
 
 	if upNodeCount < len(op.hosts) {
-		op.logger.PrintWithIndent("[%s] %d host(s) up", op.name, upNodeCount)
+		op.logger.PrintInfo("[%s] %d host(s) up", op.name, upNodeCount)
+		op.updateSpinnerMessage("%d host(s) up, expecting %d up host(s)", upNodeCount, len(op.hosts))
 		return false, nil
 	}
 
-	op.logger.PrintWithIndent("[%s] All nodes are up", op.name)
+	op.logger.PrintInfo("[%s] All nodes are up", op.name)
+	op.updateSpinnerStopMessage("all nodes are up")
 
 	return true, nil
 }

@@ -17,7 +17,6 @@ package util
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -29,11 +28,13 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
@@ -127,6 +128,16 @@ func SliceDiff[K comparable](m, n []K) []K {
 		}
 	}
 	return diff
+}
+
+// calculate and sort array commonalities: m ∩ n
+func SliceCommon[K constraints.Ordered](m, n []K) []K {
+	mSet := mapset.NewSet[K](m...)
+	nSet := mapset.NewSet[K](n...)
+	common := mSet.Intersect(nSet).ToSlice()
+	slices.Sort(common)
+
+	return common
 }
 
 // calculate diff of map keys: m-n
@@ -320,15 +331,21 @@ func AbsPathCheck(dirPath string) error {
 	return nil
 }
 
-func SplitHosts(hosts string) ([]string, error) {
-	if strings.TrimSpace(hosts) == "" {
-		return []string{}, fmt.Errorf("must specify a host or host list")
+// ParseHostList will trim spaces and convert all chars to lowercase in the hosts
+func ParseHostList(hosts *[]string) error {
+	var parsedHosts []string
+	for _, host := range *hosts {
+		parsedHost := strings.TrimSpace(strings.ToLower(host))
+		if parsedHost != "" {
+			parsedHosts = append(parsedHosts, parsedHost)
+		}
 	}
-	splitRes := strings.Split(strings.ToLower(strings.TrimSpace(hosts)), ",")
-	for i, host := range splitRes {
-		splitRes[i] = strings.TrimSpace(host)
+	if len(parsedHosts) == 0 {
+		return fmt.Errorf("must specify a host or host list")
 	}
-	return splitRes, nil
+
+	*hosts = parsedHosts
+	return nil
 }
 
 // get env var with a fallback value
@@ -379,9 +396,9 @@ func CanReadAccessDir(dirPath string) error {
 }
 
 // Check whether the directory is read accessible
-func CanWriteAccessDir(dirPath string) int {
+func CanWriteAccessPath(path string) int {
 	// check whether the path exists
-	_, err := os.Stat(dirPath)
+	_, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return FileNotExist
@@ -389,8 +406,8 @@ func CanWriteAccessDir(dirPath string) int {
 	}
 
 	// check whether the path has write access
-	if err := unix.Access(dirPath, unix.W_OK); err != nil {
-		log.Printf("Path '%s' is not writable.\n", dirPath)
+	if err := unix.Access(path, unix.W_OK); err != nil {
+		log.Printf("Path '%s' is not writable.\n", path)
 		return NoWritePerm
 	}
 
@@ -450,80 +467,31 @@ func SetParserUsage(parser *flag.FlagSet, op string) {
 	})
 }
 
-func GetOptionalFlagMsg(message string) string {
-	return message + " [Optional]"
-}
-
 func GetEonFlagMsg(message string) string {
 	return "[Eon only] " + message
 }
 
-func ValidateAbsPath(path *string, pathName string) error {
-	if path != nil {
-		err := AbsPathCheck(*path)
-		if err != nil {
-			return fmt.Errorf("must specify an absolute %s", pathName)
-		}
+func ValidateAbsPath(path, pathName string) error {
+	err := AbsPathCheck(path)
+	if err != nil {
+		return fmt.Errorf("must specify an absolute %s", pathName)
 	}
+
 	return nil
 }
 
 // ValidateRequiredAbsPath check whether a required path is set
 // then validate it
-func ValidateRequiredAbsPath(path *string, pathName string) error {
-	pathNotSpecifiedMsg := fmt.Sprintf("must specify an absolute %s", pathName)
-
-	if path != nil {
-		if *path == "" {
-			return errors.New(pathNotSpecifiedMsg)
-		}
-		return ValidateAbsPath(path, pathName)
+func ValidateRequiredAbsPath(path, pathName string) error {
+	if path == "" {
+		return fmt.Errorf("must specify an absolute %s", pathName)
 	}
 
-	return errors.New(pathNotSpecifiedMsg)
+	return ValidateAbsPath(path, pathName)
 }
 
 func ParamNotSetErrorMsg(param string) error {
 	return fmt.Errorf("%s is pointed to nil", param)
-}
-
-// ParseConfigParams builds and returns a map from a comma-separated list of params.
-func ParseConfigParams(configParamListStr string) (map[string]string, error) {
-	return ParseKeyValueListStr(configParamListStr, "config-param")
-}
-
-// ParseKeyValueListStr converts a comma-separated list of key-value pairs into a map.
-// Ex: key1=val1,key2=val2 ---> map[string]string{key1: val1, key2: val2}
-func ParseKeyValueListStr(listStr, opt string) (map[string]string, error) {
-	if listStr == "" {
-		return nil, nil
-	}
-	list := strings.Split(strings.TrimSpace(listStr), ",")
-	// passed an empty string to the given flag
-	if len(list) == 0 {
-		return nil, nil
-	}
-
-	listMap := make(map[string]string)
-	for _, param := range list {
-		// expected to see key value pairs of the format key=value
-		keyValue := strings.Split(param, "=")
-		if len(keyValue) != keyValueArrayLen {
-			return nil, fmt.Errorf("--%s option must take NAME=VALUE as argument: %s is invalid", opt, param)
-		} else if len(keyValue) > 0 && strings.TrimSpace(keyValue[0]) == "" {
-			return nil, fmt.Errorf("--%s option must take NAME=VALUE as argument with NAME being non-empty: %s is invalid", opt, param)
-		}
-		key := strings.TrimSpace(keyValue[0])
-		// the user is possible to set aws auth key to different strings like "awsauth" and "AWSAuth"
-		// we convert aws auth key to lowercase for easy retrieval in vclusterops
-		if strings.EqualFold(key, AWSAuthKey) {
-			key = strings.ToLower(key)
-		}
-		// we allow empty string value
-		value := strings.TrimSpace(keyValue[1])
-		listMap[key] = value
-	}
-	return listMap, nil
 }
 
 // GenVNodeName generates a vnode and returns it after checking it is not already
@@ -592,4 +560,67 @@ func Max[T constraints.Ordered](a, b T) T {
 		return a
 	}
 	return b
+}
+
+// GetPathPrefix returns a path prefix for a (catalog/data/depot) path of a node
+func GetPathPrefix(path string) string {
+	return filepath.Dir(filepath.Dir(path))
+}
+
+// default date time format: this omits nanoseconds but is still able to parse those out
+const DefaultDateTimeFormat = time.DateTime
+
+// default date time format: this includes nanoseconds
+const DefaultDateTimeNanoSecFormat = time.DateTime + ".000000000"
+
+// default date only format: this omits time within a date
+const DefaultDateOnlyFormat = time.DateOnly
+
+// import time package in this util file so other files don't need to import time
+// wrapper function to handle empty input string, returns an error if the time is invalid
+// caller responsible for passing in correct layout
+func IsEmptyOrValidTimeStr(layout, value string) (*time.Time, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsedTime, err := time.Parse(layout, value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsedTime, nil
+}
+
+func fillInDefaultTimeForTimestampHelper(parsedDate time.Time, hour, minute, second,
+	nanosecond int) (string, time.Time) {
+	year, month, day := parsedDate.Year(), parsedDate.Month(), parsedDate.Day()
+	location := parsedDate.Location() // Extracting the timezone
+	datetime := time.Date(year, month, day, hour, minute, second, nanosecond, location)
+	formatedDatetime := datetime.Format(DefaultDateTimeNanoSecFormat)
+	return formatedDatetime, datetime
+}
+
+// Read date only string from argument, fill in time, overwrite argument by date time string, and return parsed time,
+// the filled in time will indicate the beginning of a day
+func FillInDefaultTimeForStartTimestamp(dateonly *string) *time.Time {
+	parsedDate, _ := time.Parse(DefaultDateOnlyFormat, *dateonly)
+	formatedDatetime, datetime := fillInDefaultTimeForTimestampHelper(parsedDate, 0, 0, 0, 0)
+	*dateonly = formatedDatetime
+	return &datetime
+}
+
+// Read date only string from argument, fill in time, overwrite argument by date time string, and return parsed time,
+// the filled in time will indicate the end of a day (right before the beginning of the following day)
+func FillInDefaultTimeForEndTimestamp(dateonly *string) *time.Time {
+	parsedDate, _ := time.Parse(DefaultDateOnlyFormat, *dateonly)
+	const lastHour = 23
+	const lastMin = 59
+	const lastSec = 59
+	const lastNanoSec = 999999999
+	formatedDatetime, datetime := fillInDefaultTimeForTimestampHelper(parsedDate, lastHour, lastMin, lastSec, lastNanoSec)
+	*dateonly = formatedDatetime
+	return &datetime
+}
+
+func IsTimeEqualOrAfter(start, end time.Time) bool {
+	return end.Equal(start) || end.After(start)
 }

@@ -17,6 +17,7 @@ package vlog
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -41,6 +42,8 @@ type Printer struct {
 	LogToFileOnly bool
 	// ForCli can indicate if vclusterops is called from vcluster cli or other clients
 	ForCli bool
+
+	Writer io.Writer
 }
 
 // WithName will construct a new printer with the logger set with an additional
@@ -50,6 +53,7 @@ func (p *Printer) WithName(logName string) Printer {
 		Log:           p.Log.WithName(logName),
 		LogToFileOnly: p.LogToFileOnly,
 		ForCli:        p.ForCli,
+		Writer:        p.Writer,
 	}
 }
 
@@ -113,7 +117,7 @@ func escapeSpecialCharacters(message string) string {
 func (p *Printer) printlnCond(label, msg string) {
 	// Message is only printed if we are logging to a file only. Otherwise, it
 	// would be duplicated in the log.
-	if p.LogToFileOnly {
+	if p.LogToFileOnly && isVerboseOutputEnabled() {
 		fmt.Printf("%s%s\n", label, msg)
 	}
 }
@@ -181,7 +185,7 @@ func logMaskedArgParseHelper(inputArgv []string) (maskedPairs []string) {
 	return maskedPairs
 }
 
-// setupOrDie will setup the logging for vcluster CLI. One exit, p.Log will
+// setupOrDie will setup the logging for vcluster CLI. On exit, p.Log will
 // be set.
 func (p *Printer) SetupOrDie(logFile string) {
 	// The vcluster library uses logr as the logging API. We use Uber's zap
@@ -217,11 +221,6 @@ func (p *Printer) SetupOrDie(logFile string) {
 	p.Log.Info("Successfully started logger", "logFile", logFile)
 }
 
-// PrintWithIndent prints message to console only with an indentation
-func (p *Printer) PrintWithIndent(msg string, v ...any) {
-	if p.ForCli {
-		// the indent level may be adjusted
-		const indentLevel = 2
-		fmt.Printf("%*s%s\n", indentLevel, "", fmt.Sprintf(msg, v...))
-	}
+func isVerboseOutputEnabled() bool {
+	return os.Getenv("VERBOSE_OUTPUT") == "yes"
 }

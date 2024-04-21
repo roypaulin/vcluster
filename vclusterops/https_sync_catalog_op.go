@@ -21,20 +21,33 @@ import (
 	"strconv"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+)
+
+type SyncCatCmdType int
+
+const (
+	CreateDBSyncCat SyncCatCmdType = iota
+	StartDBSyncCat
+	StopDBSyncCat
+	StopSCSyncCat
+	AddNodeSyncCat
+	StartNodeSyncCat
+	RemoveNodeSyncCat
 )
 
 type httpsSyncCatalogOp struct {
 	opBase
 	opHTTPSBase
+	cmdType SyncCatCmdType
 }
 
-func makeHTTPSSyncCatalogOp(logger vlog.Printer, hosts []string, useHTTPPassword bool,
-	userName string, httpsPassword *string) (httpsSyncCatalogOp, error) {
+func makeHTTPSSyncCatalogOp(hosts []string, useHTTPPassword bool,
+	userName string, httpsPassword *string, cmdType SyncCatCmdType) (httpsSyncCatalogOp, error) {
 	op := httpsSyncCatalogOp{}
 	op.name = "HTTPSSyncCatalogOp"
-	op.logger = logger.WithName(op.name)
+	op.description = "Synchronize catalog with communal storage"
 	op.hosts = hosts
+	op.cmdType = cmdType
 	op.useHTTPPassword = useHTTPPassword
 
 	err := util.ValidateUsernameAndPassword(op.name, useHTTPPassword, userName)
@@ -47,9 +60,9 @@ func makeHTTPSSyncCatalogOp(logger vlog.Printer, hosts []string, useHTTPPassword
 	return op, nil
 }
 
-func makeHTTPSSyncCatalogOpWithoutHosts(logger vlog.Printer, useHTTPPassword bool,
-	userName string, httpsPassword *string) (httpsSyncCatalogOp, error) {
-	return makeHTTPSSyncCatalogOp(logger, nil, useHTTPPassword, userName, httpsPassword)
+func makeHTTPSSyncCatalogOpWithoutHosts(useHTTPPassword bool,
+	userName string, httpsPassword *string, cmdType SyncCatCmdType) (httpsSyncCatalogOp, error) {
+	return makeHTTPSSyncCatalogOp(nil, useHTTPPassword, userName, httpsPassword, cmdType)
 }
 
 func (op *httpsSyncCatalogOp) setupClusterHTTPRequest(hosts []string) error {
@@ -72,11 +85,20 @@ func (op *httpsSyncCatalogOp) setupClusterHTTPRequest(hosts []string) error {
 func (op *httpsSyncCatalogOp) prepare(execContext *opEngineExecContext) error {
 	// If no hosts passed in, we will find the hosts from execute-context
 	if len(op.hosts) == 0 {
-		if len(execContext.upHosts) == 0 {
-			return fmt.Errorf(`[%s] Cannot find any up hosts in OpEngineExecContext`, op.name)
+		if op.cmdType == StopSCSyncCat {
+			// execContext.nodesInfo stores the information of UP nodes in target subcluster
+			if len(execContext.nodesInfo) == 0 {
+				return fmt.Errorf(`[%s] Cannot find any node information of target subcluster in OpEngineExecContext`, op.name)
+			}
+			// use first up host in subcluster to execute https post request
+			op.hosts = []string{execContext.nodesInfo[0].Address}
+		} else {
+			if len(execContext.upHosts) == 0 {
+				return fmt.Errorf(`[%s] Cannot find any up hosts in OpEngineExecContext`, op.name)
+			}
+			// use first up host to execute https post request
+			op.hosts = []string{execContext.upHosts[0]}
 		}
-		// use first up host to execute https post request
-		op.hosts = []string{execContext.upHosts[0]}
 	}
 	execContext.dispatcher.setup(op.hosts)
 

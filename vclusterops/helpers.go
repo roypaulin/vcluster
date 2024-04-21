@@ -23,7 +23,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 const (
@@ -36,18 +35,18 @@ const (
 
 // produceTransferConfigOps generates instructions to transfert some config
 // files from a sourceConfig node to target nodes.
-func produceTransferConfigOps(logger vlog.Printer, instructions *[]clusterOp, sourceConfigHost,
+func produceTransferConfigOps(instructions *[]clusterOp, sourceConfigHost,
 	targetHosts []string, vdb *VCoordinationDatabase) {
 	var verticaConfContent string
 	nmaDownloadVerticaConfigOp := makeNMADownloadConfigOp(
-		logger, "NMADownloadVerticaConfigOp", sourceConfigHost, "config/vertica", &verticaConfContent, vdb)
+		"NMADownloadVerticaConfigOp", sourceConfigHost, "config/vertica", &verticaConfContent, vdb)
 	nmaUploadVerticaConfigOp := makeNMAUploadConfigOp(
-		logger, "NMAUploadVerticaConfigOp", sourceConfigHost, targetHosts, "config/vertica", &verticaConfContent, vdb)
+		"NMAUploadVerticaConfigOp", sourceConfigHost, targetHosts, "config/vertica", &verticaConfContent, vdb)
 	var spreadConfContent string
 	nmaDownloadSpreadConfigOp := makeNMADownloadConfigOp(
-		logger, "NMADownloadSpreadConfigOp", sourceConfigHost, "config/spread", &spreadConfContent, vdb)
+		"NMADownloadSpreadConfigOp", sourceConfigHost, "config/spread", &spreadConfContent, vdb)
 	nmaUploadSpreadConfigOp := makeNMAUploadConfigOp(
-		logger, "NMAUploadSpreadConfigOp", sourceConfigHost, targetHosts, "config/spread", &spreadConfContent, vdb)
+		"NMAUploadSpreadConfigOp", sourceConfigHost, targetHosts, "config/spread", &spreadConfContent, vdb)
 	*instructions = append(*instructions,
 		&nmaDownloadVerticaConfigOp,
 		&nmaUploadVerticaConfigOp,
@@ -99,18 +98,49 @@ func getPrimaryHostsWithLatestCatalog(nmaVDB *nmaVDatabase, hostsWithLatestCatal
 // The following structs will store hosts' necessary information for https_get_up_nodes_op,
 // https_get_nodes_information_from_running_db, and incoming operations.
 type nodeStateInfo struct {
-	Address     string `json:"address"`
-	State       string `json:"state"`
-	Database    string `json:"database"`
-	CatalogPath string `json:"catalog_path"`
-	Subcluster  string `json:"subcluster_name"`
-	IsPrimary   bool   `json:"is_primary"`
-	Name        string `json:"name"`
-	Sandbox     string `json:"sandbox_name"`
+	Address          string   `json:"address"`
+	State            string   `json:"state"`
+	Database         string   `json:"database"`
+	CatalogPath      string   `json:"catalog_path"`
+	DepotPath        string   `json:"depot_path"`
+	StorageLocations []string `json:"data_path"`
+	Subcluster       string   `json:"subcluster_name"`
+	IsPrimary        bool     `json:"is_primary"`
+	Name             string   `json:"name"`
+	Sandbox          string   `json:"sandbox_name"`
+	Version          string   `json:"build_info"`
+}
+
+func (node *nodeStateInfo) asNodeInfo() (n NodeInfo, err error) {
+	n = node.asNodeInfoWoVer()
+	// version can be, eg, v24.0.0-<revision> or v23.4.0-<hotfix|date>-<revision> including a hotfix or daily build date
+	verWithHotfix := 3
+	verWithoutHotfix := 2
+	if parts := strings.Split(node.Version, "-"); len(parts) == verWithHotfix {
+		n.Version = parts[0] + "-" + parts[1]
+		n.Revision = parts[2]
+	} else if len(parts) == verWithoutHotfix {
+		n.Version = parts[0]
+		n.Revision = parts[1]
+	} else {
+		err = fmt.Errorf("failed to parse version '%s'", node.Version)
+	}
+	return
+}
+
+// asNodeInfoWoVer will create a NodeInfo with empty Version and Revision
+func (node *nodeStateInfo) asNodeInfoWoVer() (n NodeInfo) {
+	n.Address = node.Address
+	n.Name = node.Name
+	n.State = node.State
+	n.CatalogPath = node.CatalogPath
+	n.Subcluster = node.Subcluster
+	n.IsPrimary = node.IsPrimary
+	return
 }
 
 type nodesStateInfo struct {
-	NodeList []nodeStateInfo `json:"node_list"`
+	NodeList []*nodeStateInfo `json:"node_list"`
 }
 
 // getInitiatorHost returns as initiator the first primary up node that is not
@@ -124,21 +154,32 @@ func getInitiatorHost(primaryUpNodes, hostsToSkip []string) (string, error) {
 	return initiatorHosts[0], nil
 }
 
+// getVDBFromRunningDB will retrieve db configurations from a non-sandboxed host by calling https endpoints of a running db
+func (vcc VClusterCommands) getVDBFromRunningDB(vdb *VCoordinationDatabase, options *DatabaseOptions) error {
+	return vcc.getVDBFromRunningDBImpl(vdb, options, false, util.MainClusterSandbox)
+}
+
+// getVDBFromRunningDB will retrieve db configurations from any UP host by calling https endpoints of a running db
+func (vcc VClusterCommands) getVDBFromRunningDBIncludeSandbox(vdb *VCoordinationDatabase, options *DatabaseOptions, sandbox string) error {
+	return vcc.getVDBFromRunningDBImpl(vdb, options, true, sandbox)
+}
+
 // getVDBFromRunningDB will retrieve db configurations by calling https endpoints of a running db
-func (vcc *VClusterCommands) getVDBFromRunningDB(vdb *VCoordinationDatabase, options *DatabaseOptions) error {
+func (vcc VClusterCommands) getVDBFromRunningDBImpl(vdb *VCoordinationDatabase, options *DatabaseOptions,
+	allowUseSandboxRes bool, sandbox string) error {
 	err := options.setUsePassword(vcc.Log)
 	if err != nil {
 		return fmt.Errorf("fail to set userPassword while retrieving database configurations, %w", err)
 	}
 
-	httpsGetNodesInfoOp, err := makeHTTPSGetNodesInfoOp(vcc.Log, *options.DBName, options.Hosts,
-		options.usePassword, *options.UserName, options.Password, vdb)
+	httpsGetNodesInfoOp, err := makeHTTPSGetNodesInfoOp(options.DBName, options.Hosts,
+		options.usePassword, options.UserName, options.Password, vdb, allowUseSandboxRes, sandbox)
 	if err != nil {
 		return fmt.Errorf("fail to produce httpsGetNodesInfo instructions while retrieving database configurations, %w", err)
 	}
 
-	httpsGetClusterInfoOp, err := makeHTTPSGetClusterInfoOp(vcc.Log, *options.DBName, options.Hosts,
-		options.usePassword, *options.UserName, options.Password, vdb)
+	httpsGetClusterInfoOp, err := makeHTTPSGetClusterInfoOp(options.DBName, options.Hosts,
+		options.usePassword, options.UserName, options.Password, vdb)
 	if err != nil {
 		return fmt.Errorf("fail to produce httpsGetClusterInfo instructions while retrieving database configurations, %w", err)
 	}
@@ -151,6 +192,32 @@ func (vcc *VClusterCommands) getVDBFromRunningDB(vdb *VCoordinationDatabase, opt
 	err = clusterOpEngine.run(vcc.Log)
 	if err != nil {
 		return fmt.Errorf("fail to retrieve database configurations, %w", err)
+	}
+
+	return nil
+}
+
+// getClusterInfoFromRunningDB will retrieve db configurations by calling https endpoints of a running db
+func (vcc VClusterCommands) getClusterInfoFromRunningDB(vdb *VCoordinationDatabase, options *DatabaseOptions) error {
+	err := options.setUsePassword(vcc.Log)
+	if err != nil {
+		return fmt.Errorf("fail to set userPassword while retrieving cluster configurations, %w", err)
+	}
+
+	httpsGetClusterInfoOp, err := makeHTTPSGetClusterInfoOp(options.DBName, options.Hosts,
+		options.usePassword, options.UserName, options.Password, vdb)
+	if err != nil {
+		return fmt.Errorf("fail to produce httpsGetClusterInfo instructions while retrieving cluster configurations, %w", err)
+	}
+
+	var instructions []clusterOp
+	instructions = append(instructions, &httpsGetClusterInfoOp)
+
+	certs := httpsCerts{key: options.Key, cert: options.Cert, caCert: options.CaCert}
+	clusterOpEngine := makeClusterOpEngine(instructions, &certs)
+	err = clusterOpEngine.run(vcc.Log)
+	if err != nil {
+		return fmt.Errorf("fail to retrieve cluster configurations, %w", err)
 	}
 
 	return nil
@@ -180,8 +247,21 @@ func getInitiator(hosts []string) string {
 	return hosts[0]
 }
 
-func cannotFindDBFromConfigErr(dbName string) error {
-	return fmt.Errorf("database %s cannot be found in the config file", dbName)
+// getInitiator will pick an initiator from the up host list to execute https calls
+// such that the initiator is also among the user provided host list
+func getInitiatorFromUpHosts(upHosts, userProvidedHosts []string) string {
+	// Create a hash set for user-provided hosts
+	userHostsSet := mapset.NewSet[string](userProvidedHosts...)
+
+	// Iterate through upHosts and check if any host is in the userHostsSet
+	for _, upHost := range upHosts {
+		if userHostsSet.Contains(upHost) {
+			return upHost
+		}
+	}
+
+	// Return an empty string if no matching host is found
+	return ""
 }
 
 // validates each host has an entry in each map

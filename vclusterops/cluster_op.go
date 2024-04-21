@@ -25,7 +25,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/theckman/yacspin"
 	"github.com/vertica/vcluster/vclusterops/util"
 	"github.com/vertica/vcluster/vclusterops/vlog"
 )
@@ -170,6 +173,12 @@ func (status resultStatus) getStatusString() string {
 // log* implemented by embedding OpBase, but overrideable
 type clusterOp interface {
 	getName() string
+	setLogger(logger vlog.Printer)
+	setupSpinner()
+	startSpinner()
+	cleanupSpinner()
+	stopFailSpinner()
+	stopFailSpinnerWithMessage(errMsg string, v ...any)
 	prepare(execContext *opEngineExecContext) error
 	execute(execContext *opEngineExecContext) error
 	finalize(execContext *opEngineExecContext) error
@@ -191,15 +200,21 @@ type clusterOp interface {
 type opBase struct {
 	logger             vlog.Printer
 	name               string
+	description        string
 	hosts              []string
 	clusterHTTPRequest clusterHTTPRequest
 	skipExecute        bool // This can be set during prepare if we determine no work is needed
+	spinner            *yacspin.Spinner
 }
 
 type opResponseMap map[string]string
 
 func (op *opBase) getName() string {
 	return op.name
+}
+
+func (op *opBase) setLogger(logger vlog.Printer) {
+	op.logger = logger.WithName(op.name)
 }
 
 func (op *opBase) parseAndCheckResponse(host, responseContent string, responseObj any) error {
@@ -234,6 +249,84 @@ func (op *opBase) setupBasicInfo() {
 	op.setVersionToSemVar()
 }
 
+// setupSpinner sets up the progress spinner
+func (op *opBase) setupSpinner() {
+	if op.logger.ForCli {
+		cfg := yacspin.Config{
+			Frequency:         100 * time.Millisecond,
+			CharSet:           yacspin.CharSets[11],
+			Suffix:            " " + op.description,
+			SuffixAutoColon:   true,
+			Message:           "in progress",
+			StopCharacter:     "✔",
+			StopColors:        []string{"fgGreen"},
+			StopFailCharacter: "✘",
+			StopFailMessage:   "failed",
+			StopFailColors:    []string{"fgRed"},
+			Writer:            op.logger.Writer, // if nil, writing to stdout
+		}
+		spinner, err := yacspin.New(cfg)
+		if err != nil {
+			op.logger.PrintWarning("[UI][%s] progress spinner failed to initialize: %v", op.name, err)
+			return
+		}
+		spinner.Reverse()
+		op.spinner = spinner
+	}
+}
+
+func (op *opBase) startSpinner() {
+	if op.spinner != nil {
+		err := op.spinner.Start()
+		if err != nil {
+			op.logger.PrintWarning("[UI][%s] progress spinner failed to start: %v\n", op.name, err)
+		}
+	}
+}
+
+func (op *opBase) cleanupSpinner() {
+	if op.spinner != nil && op.spinner.Status() == yacspin.SpinnerRunning {
+		err := op.spinner.Stop()
+		if err != nil {
+			op.logger.PrintWarning("[UI][%s] progress spinner failed to stop: %v\n", op.name, err)
+		}
+	}
+}
+
+func (op *opBase) updateSpinnerMessage(msg string, v ...any) {
+	if op.spinner != nil {
+		op.spinner.Message(fmt.Sprintf(msg, v...))
+	}
+}
+
+func (op *opBase) updateSpinnerStopMessage(msg string, v ...any) {
+	if op.spinner != nil {
+		op.spinner.StopMessage(fmt.Sprintf(msg, v...))
+	}
+}
+
+func (op *opBase) updateSpinnerStopFailMessage(msg string, v ...any) {
+	if op.spinner != nil {
+		op.spinner.StopFailMessage(fmt.Sprintf(msg, v...))
+	}
+}
+
+func (op *opBase) stopFailSpinner() {
+	if op.spinner != nil {
+		err := op.spinner.StopFail()
+		if err != nil {
+			op.logger.PrintWarning("Spinner error: %v", err)
+		}
+	}
+}
+
+func (op *opBase) stopFailSpinnerWithMessage(errMsg string, v ...any) {
+	if op.spinner != nil {
+		op.spinner.StopFailMessage(fmt.Sprintf(errMsg, v...))
+		op.stopFailSpinner()
+	}
+}
+
 func (op *opBase) logResponse(host string, result hostHTTPResult) {
 	if result.err != nil {
 		op.logger.PrintError("[%s] result from host %s summary %s, details: %+v",
@@ -250,7 +343,6 @@ func (op *opBase) logPrepare() {
 
 func (op *opBase) logExecute() {
 	op.logger.Info("Execute() called", "name", op.name)
-	op.logger.PrintInfo("[%s] is running", op.name)
 }
 
 func (op *opBase) logFinalize() {
@@ -258,7 +350,7 @@ func (op *opBase) logFinalize() {
 }
 
 func (op *opBase) runExecute(execContext *opEngineExecContext) error {
-	err := execContext.dispatcher.sendRequest(&op.clusterHTTPRequest)
+	err := execContext.dispatcher.sendRequest(&op.clusterHTTPRequest, op.spinner)
 	if err != nil {
 		op.logger.Error(err, "Fail to dispatch request, detail", "dispatch request", op.clusterHTTPRequest)
 		return err
@@ -275,6 +367,10 @@ func (op *opBase) loadCertsIfNeeded(certs *httpsCerts, findCertsInOptions bool) 
 	// this step is executed after Prepare() so all http requests should be set up
 	if len(op.clusterHTTPRequest.RequestCollection) == 0 {
 		return fmt.Errorf("[%s] has not set up a http request", op.name)
+	}
+
+	if certs == nil {
+		return fmt.Errorf("[%s] is trying to use certificates, but none are set", op.name)
 	}
 
 	for host := range op.clusterHTTPRequest.RequestCollection {
@@ -380,8 +476,72 @@ func (opb *opHTTPSBase) validateAndSetUsernameAndPassword(opName string, useHTTP
 	return nil
 }
 
+type ClusterCommands interface {
+	GetLog() vlog.Printer
+	V(int) logr.Logger
+	LogInfo(msg string, keysAndValues ...any)
+	LogError(err error, msg string, keysAndValues ...any)
+	PrintInfo(msg string, v ...any)
+	PrintWarning(msg string, v ...any)
+	PrintError(msg string, v ...any)
+
+	VAddNode(options *VAddNodeOptions) (VCoordinationDatabase, error)
+	VAddSubcluster(options *VAddSubclusterOptions) error
+	VCreateDatabase(options *VCreateDatabaseOptions) (VCoordinationDatabase, error)
+	VDropDatabase(options *VDropDatabaseOptions) error
+	VFetchNodeState(options *VFetchNodeStateOptions) ([]NodeInfo, error)
+	VInstallPackages(options *VInstallPackagesOptions) (*InstallPackageStatus, error)
+	VReIP(options *VReIPOptions) error
+	VRemoveNode(options *VRemoveNodeOptions) (VCoordinationDatabase, error)
+	VRemoveSubcluster(removeScOpt *VRemoveScOptions) (VCoordinationDatabase, error)
+	VReviveDatabase(options *VReviveDatabaseOptions) (dbInfo string, vdbPtr *VCoordinationDatabase, err error)
+	VSandbox(options *VSandboxOptions) error
+	VScrutinize(options *VScrutinizeOptions) error
+	VShowRestorePoints(options *VShowRestorePointsOptions) (restorePoints []RestorePoint, err error)
+	VStartDatabase(options *VStartDatabaseOptions) (vdbPtr *VCoordinationDatabase, err error)
+	VStartNodes(options *VStartNodesOptions) error
+	VStopDatabase(options *VStopDatabaseOptions) error
+	VReplicateDatabase(options *VReplicationDatabaseOptions) error
+	VFetchCoordinationDatabase(options *VFetchCoordinationDatabaseOptions) (VCoordinationDatabase, error)
+	VUnsandbox(options *VUnsandboxOptions) error
+	VStopSubcluster(options *VStopSubclusterOptions) error
+	VFetchNodesDetails(options *VFetchNodesDetailsOptions) (NodesDetails, error)
+}
+
+type VClusterCommandsLogger struct {
+	Log vlog.Printer
+}
+
+func (vcc VClusterCommandsLogger) GetLog() vlog.Printer {
+	return vcc.Log
+}
+
+func (vcc VClusterCommandsLogger) V(level int) logr.Logger {
+	return vcc.Log.V(level)
+}
+
+func (vcc VClusterCommandsLogger) LogInfo(msg string, keysAndValues ...any) {
+	vcc.Log.Info(msg, keysAndValues...)
+}
+
+func (vcc VClusterCommandsLogger) LogError(err error, msg string, keysAndValues ...any) {
+	vcc.Log.Error(err, msg, keysAndValues...)
+}
+
+func (vcc VClusterCommandsLogger) PrintInfo(msg string, v ...any) {
+	vcc.Log.PrintInfo(msg, v...)
+}
+
+func (vcc VClusterCommandsLogger) PrintWarning(msg string, v ...any) {
+	vcc.Log.PrintWarning(msg, v...)
+}
+
+func (vcc VClusterCommandsLogger) PrintError(msg string, v ...any) {
+	vcc.Log.PrintError(msg, v...)
+}
+
 // VClusterCommands passes state around for all top-level administrator commands
 // (e.g. create db, add node, etc.).
 type VClusterCommands struct {
-	Log vlog.Printer
+	VClusterCommandsLogger
 }

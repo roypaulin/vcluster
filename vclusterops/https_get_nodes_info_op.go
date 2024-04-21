@@ -21,22 +21,27 @@ import (
 	"strings"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
+)
+
+const (
+	AnySandbox = "*"
 )
 
 type httpsGetNodesInfoOp struct {
 	opBase
 	opHTTPSBase
-	dbName string
-	vdb    *VCoordinationDatabase
+	dbName                  string
+	vdb                     *VCoordinationDatabase
+	allowUseSandboxResponse bool
+	sandbox                 string
 }
 
-func makeHTTPSGetNodesInfoOp(logger vlog.Printer, dbName string, hosts []string,
+func makeHTTPSGetNodesInfoOp(dbName string, hosts []string,
 	useHTTPPassword bool, userName string, httpsPassword *string, vdb *VCoordinationDatabase,
-) (httpsGetNodesInfoOp, error) {
+	allowUseSandboxResponse bool, sandbox string) (httpsGetNodesInfoOp, error) {
 	op := httpsGetNodesInfoOp{}
 	op.name = "HTTPSGetNodeInfoOp"
-	op.logger = logger.WithName(op.name)
+	op.description = "Collect node information"
 	op.dbName = dbName
 	op.hosts = hosts
 	op.vdb = vdb
@@ -44,6 +49,8 @@ func makeHTTPSGetNodesInfoOp(logger vlog.Printer, dbName string, hosts []string,
 	err := op.validateAndSetUsernameAndPassword(op.name, useHTTPPassword, userName,
 		httpsPassword)
 
+	op.allowUseSandboxResponse = allowUseSandboxResponse
+	op.sandbox = sandbox
 	return op, err
 }
 
@@ -77,6 +84,28 @@ func (op *httpsGetNodesInfoOp) execute(execContext *opEngineExecContext) error {
 	return op.processResult(execContext)
 }
 
+func (op *httpsGetNodesInfoOp) shouldUseResponse(host string, nodesStates *nodesStateInfo) bool {
+	// should use a response from a non-sandboxed node to build vdb in most cases, i.e.,
+	// create db, remove node, remove subcluster, add node and unsandbox;
+	// there is one case that don't care about where the response is from: start node
+	responseSandbox := ""
+	for _, node := range nodesStates.NodeList {
+		if node.Address == host {
+			responseSandbox = node.Sandbox
+			break
+		}
+	}
+	// continue to parse next response if a response from main cluster node is expected
+	if responseSandbox != "" && !op.allowUseSandboxResponse {
+		return false
+	}
+	// continue to parse next response if a response from a different sandbox is expected
+	if op.sandbox != AnySandbox && responseSandbox != op.sandbox {
+		return false
+	}
+	return true
+}
+
 func (op *httpsGetNodesInfoOp) processResult(_ *opEngineExecContext) error {
 	var allErrs error
 	for host, result := range op.clusterHTTPRequest.ResultCollection {
@@ -95,6 +124,9 @@ func (op *httpsGetNodesInfoOp) processResult(_ *opEngineExecContext) error {
 				allErrs = errors.Join(allErrs, err)
 				break
 			}
+			if !op.shouldUseResponse(host, &nodesStates) {
+				continue
+			}
 			// save nodes info to vdb
 			op.vdb.HostNodeMap = makeVHostNodeMap()
 			op.vdb.HostList = []string{}
@@ -108,6 +140,8 @@ func (op *httpsGetNodesInfoOp) processResult(_ *opEngineExecContext) error {
 				vNode.Name = node.Name
 				vNode.Address = node.Address
 				vNode.CatalogPath = node.CatalogPath
+				vNode.DepotPath = node.DepotPath
+				vNode.StorageLocations = node.StorageLocations
 				vNode.IsPrimary = node.IsPrimary
 				vNode.State = node.State
 				vNode.Subcluster = node.Subcluster

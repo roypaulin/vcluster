@@ -21,7 +21,6 @@ import (
 	"strconv"
 
 	"github.com/vertica/vcluster/vclusterops/util"
-	"github.com/vertica/vcluster/vclusterops/vlog"
 )
 
 const zeroSafeRspStr = "Marked design 0-safe"
@@ -35,7 +34,6 @@ type httpsMarkDesignKSafeOp struct {
 }
 
 func makeHTTPSMarkDesignKSafeOp(
-	logger vlog.Printer,
 	hosts []string,
 	useHTTPPassword bool,
 	userName string,
@@ -44,7 +42,7 @@ func makeHTTPSMarkDesignKSafeOp(
 ) (httpsMarkDesignKSafeOp, error) {
 	op := httpsMarkDesignKSafeOp{}
 	op.name = "HTTPSMarkDesignKsafeOp"
-	op.logger = logger.WithName(op.name)
+	op.description = "Set k-safety"
 	op.hosts = hosts
 	op.useHTTPPassword = useHTTPPassword
 

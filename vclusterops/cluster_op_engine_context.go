@@ -23,17 +23,19 @@ type opEngineExecContext struct {
 	nmaVDatabase    nmaVDatabase
 	upHosts         []string // a sorted host list that contains all up nodes
 	nodesInfo       []NodeInfo
+	scNodesInfo     []NodeInfo // a node list contains all nodes in a subcluster
 
 	// This field is specifically used for sandboxing
 	// as sandboxing requires all nodes in the subcluster to be sandboxed to be UP.
 	upScInfo                      map[string]string // map with UP hosts as keys and their subcluster names as values.
-	sandboxingHosts               []string          // List of hosts that should run sandboxing command
+	upHostsToSandboxes            map[string]string // map with UP hosts as keys and their corresponding sandbox names as values.
 	defaultSCName                 string            // store the default subcluster name of the database
 	hostsWithLatestCatalog        []string
 	primaryHostsWithLatestCatalog []string
 	startupCommandMap             map[string][]string // store start up command map to start nodes
 	dbInfo                        string              // store the db info that retrieved from communal storage
 	restorePoints                 []RestorePoint      // store list existing restore points that queried from an archive
+	systemTableList               systemTableListInfo // used for staging system tables
 }
 
 func makeOpEngineExecContext(logger vlog.Printer) opEngineExecContext {
