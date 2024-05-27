@@ -102,6 +102,15 @@ func makeNMAVerticaVersionOpWithVDB(sameVersion bool, vdb *VCoordinationDatabase
 	return op
 }
 
+// makeNMAVerticaVersionOpBeforeStartNode is used in start_node, VCluster will check Vertica
+// version for the nodes which are in the same cluster(main cluster or sandbox) as the target hosts
+func makeNMAVerticaVersionOpBeforeStartNode(vdb *VCoordinationDatabase, hosts []string) nmaVerticaVersionOp {
+	op := makeNMACheckVerticaVersionOp(nil /*hosts*/, true /*sameVersion*/, vdb.IsEon)
+	op.targetNodeIPs = hosts
+	op.vdb = vdb
+	return op
+}
+
 func (op *nmaVerticaVersionOp) setupClusterHTTPRequest(hosts []string) error {
 	for _, host := range hosts {
 		httpRequest := hostHTTPRequest{}
@@ -161,7 +170,11 @@ func (op *nmaVerticaVersionOp) prepare(execContext *opEngineExecContext) error {
 		if op.vdb != nil {
 			// db is up
 			op.HasIncomingSCNames = true
-			for host, vnode := range op.vdb.HostNodeMap {
+			hostNodeMap, err := op.prepareHostNodeMapWithVDB()
+			if err != nil {
+				return err
+			}
+			for host, vnode := range hostNodeMap {
 				op.hosts = append(op.hosts, host)
 				sc := vnode.Subcluster
 				// Update subcluster of new nodes that will be assigned to default subcluster.
@@ -386,4 +399,33 @@ func (op *nmaVerticaVersionOp) prepareHostNodeMap(execContext *opEngineExecConte
 		hostNodeMap = util.FilterMapByKey(execContext.nmaVDatabase.HostNodeMap, allHostsInTargetSCs)
 	}
 	return hostNodeMap, nil
+}
+
+// prepareHostNodeMapWithVDB is a helper to make a host-node map for nodes in the main cluster
+// or in a sandbox
+func (op *nmaVerticaVersionOp) prepareHostNodeMapWithVDB() (vHostNodeMap, error) {
+	if len(op.targetNodeIPs) == 0 {
+		return op.vdb.HostNodeMap, nil
+	}
+	hostNodeMap := makeVHostNodeMap()
+	// we pass in the first host because we expect all of the
+	// target hosts to belong to the same cluster
+	sbName, err := op.getSandboxName(op.targetNodeIPs[0])
+	if err != nil {
+		return hostNodeMap, err
+	}
+	for host, vnode := range op.vdb.HostNodeMap {
+		if vnode.Sandbox == sbName {
+			hostNodeMap[host] = vnode
+		}
+	}
+	return hostNodeMap, nil
+}
+
+func (op *nmaVerticaVersionOp) getSandboxName(host string) (string, error) {
+	vnode, ok := op.vdb.HostNodeMap[host]
+	if !ok {
+		return "", fmt.Errorf("[%s] host %s does not exist in the database", op.name, host)
+	}
+	return vnode.Sandbox, nil
 }
